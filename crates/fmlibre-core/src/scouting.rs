@@ -1033,7 +1033,7 @@ fn role_rating(attributes: &[u8], weights: &[(usize, f32)]) -> Option<f32> {
 
 /// How much of his attributes a player brings to a position rated `rating` (1–20): all of them from 15, where the
 /// game calls him accomplished there, less below.
-fn position_factor(rating: u8) -> f32 {
+pub(crate) fn position_factor(rating: u8) -> f32 {
     match rating {
         18.. => 1.0,
         15..=17 => 0.97,
@@ -1052,7 +1052,7 @@ pub(crate) struct Measured {
     pub(crate) fit: u8,
     ip: Option<(f32, &'static str)>,
     oop: Option<(f32, &'static str)>,
-    rating: u8,
+    pub(crate) rating: u8,
 }
 
 /// Roles by key with their attribute weights.
@@ -1066,6 +1066,11 @@ pub(crate) struct Measure {
 }
 
 impl Measure {
+    /// The measure for a position (a key of [`SCOUT_POSITIONS`]) and the roles of it that suit each player best.
+    pub(crate) fn for_position(key: &str) -> Result<Self, ScoutError> {
+        Self::new(&ScoutRequest { position: key.to_owned(), ..ScoutRequest::default() })
+    }
+
     pub(crate) fn new(request: &ScoutRequest) -> Result<Self, ScoutError> {
         let unknown = |key: &str| ScoutError::UnknownRole { key: key.to_owned() };
         let position = scout_position(&request.position).ok_or_else(|| unknown(&request.position))?;

@@ -12,13 +12,13 @@ use std::time::Instant;
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use fmlibre_core::{
-    ATTRIBUTE_GROUPS, ArrayCandidate, ArrayRvas, ArraySource, AttributeBound, BuildProfile, Buyer, CaptainRole,
-    ClubIndex, Entity, ExportFormat, ExportHeader, Exported, Field, FmDate, Found, GAME_EXE, GAME_PLUGIN, GameInfo,
-    GraphicsIndex, Kind, Loan, MANAGER, MoveTerms, NameKind, PERSONALITY, POSITIONS, PersonNames, Picture,
-    PlayerFilter, PlayerIndex, PlayerOrder, PlayerSort, PrizeAmount, PrizeMoney, PrizeStage, ProfileNotes, Purpose,
-    STAFF_ATTRIBUTE_GROUPS, SUPPORTER_MIX, SUPPORTER_TRAITS, Scale, ScanOptions, ScoutOrder, ScoutRequest, Session,
-    SessionError, StaffIndex, Target, Tie, TieTarget, date_line, diagnostics_report, find_game, job_name, nations,
-    profile_text, retirement_line, saves_loaded_line, scan_object_arrays, sort_players,
+    ABILITY_WEIGHT, ATTRIBUTE_GROUPS, ArrayCandidate, ArrayRvas, ArraySource, AttributeBound, BuildProfile, Buyer,
+    CaptainRole, ClubIndex, Entity, ExportFormat, ExportHeader, Exported, Field, FmDate, Found, GAME_EXE, GAME_PLUGIN,
+    GameInfo, GraphicsIndex, Kind, LineupOptions, Loan, MANAGER, MoveTerms, NameKind, PERSONALITY, POSITIONS,
+    PersonNames, Picture, PlayerFilter, PlayerIndex, PlayerOrder, PlayerSort, PrizeAmount, PrizeMoney, PrizeStage,
+    ProfileNotes, Purpose, STAFF_ATTRIBUTE_GROUPS, SUPPORTER_MIX, SUPPORTER_TRAITS, Scale, ScanOptions, ScoutOrder,
+    ScoutRequest, Session, SessionError, StaffIndex, Target, Tie, TieTarget, date_line, diagnostics_report, find_game,
+    job_name, nations, profile_text, retirement_line, saves_loaded_line, scan_object_arrays, sort_players,
 };
 #[cfg(target_os = "macos")]
 use fmlibre_mem::MachImage;
@@ -581,6 +581,28 @@ enum Command {
         /// Show the tactics the manager plays (a pass over the game's memory).
         #[arg(long)]
         tactics: bool,
+    },
+    /// The eleven of a club's senior squad that fits each of the editor's formations best, the formation that suits
+    /// the squad most first, and the eleven of the players it leaves out, as its cover: for the next match (injured
+    /// and banned players left out, the others as ready as their energy and match sharpness make them) or, with
+    /// --full-strength, the whole squad at its best. The score is the editor's own measure of current ability and
+    /// of attributes against roles, not the match engine's. Only reads memory.
+    Lineup {
+        /// The club (the human manager's when none).
+        #[arg(long)]
+        club: Option<u32>,
+        /// Show the eleven of this formation only, e.g. "4-3-3 DM Wide".
+        #[arg(long)]
+        formation: Option<String>,
+        /// How many formations to show the eleven of.
+        #[arg(long, default_value_t = 3)]
+        top: usize,
+        /// Count everyone as available and fully fit.
+        #[arg(long)]
+        full_strength: bool,
+        /// How much of a place's score is the player's current ability, 0 to 1; the rest is his fit for the roles.
+        #[arg(long, default_value_t = ABILITY_WEIGHT)]
+        ability_weight: f32,
     },
     /// Show a club's teams: their kind, captains and players with their live values.
     Teams {
@@ -1403,6 +1425,10 @@ fn run(cli: Cli) -> Result<()> {
                 ..ScoutRequest::default()
             });
             scout(&session, club, request, squad, tactics)
+        }
+        Command::Lineup { club, formation, top, full_strength, ability_weight } => {
+            let session = connect(process, ArraySource::ProfileFirst)?;
+            lineup(&session, club, formation.as_deref(), top, LineupOptions { full_strength, ability_weight })
         }
         Command::Teams { club } => teams(&connect(process, ArraySource::ProfileFirst)?, club),
         Command::Youth { club } => youth(&connect(process, ArraySource::ProfileFirst)?, club),
@@ -6376,6 +6402,90 @@ fn iso_date(date: Option<FmDate>) -> String {
 }
 
 /// Shortens `text` to at most `width` characters.
+fn lineup(
+    session: &Session,
+    club: Option<u32>,
+    formation: Option<&str>,
+    top: usize,
+    options: LineupOptions,
+) -> Result<()> {
+    let players = PlayerIndex::new(session.players()?);
+    let clubs = ClubIndex::new(session.clubs()?);
+    let human = session.staff()?.iter().filter(|s| s.is_human).find_map(|s| s.club_uid);
+    let uid = club.or(human).context("no club given and no human manager with a club")?;
+    let club = clubs.get(uid).with_context(|| format!("no club with UID {uid}"))?;
+    let started = Instant::now();
+    let report = session.lineups(club, &players, options)?;
+    if let Some(key) = formation {
+        ensure!(
+            report.lineups.iter().any(|lineup| lineup.formation.eq_ignore_ascii_case(key)),
+            "no formation {key}; the editor's are: {}",
+            report.lineups.iter().map(|lineup| lineup.formation).collect::<Vec<_>>().join(", ")
+        );
+    }
+    println!(
+        "{}: {} players to pick from ({}), in {:.2} s",
+        club.name,
+        report.available,
+        if options.full_strength { "the whole squad, fully fit" } else { "for the next match" },
+        started.elapsed().as_secs_f64()
+    );
+    for out in &report.left_out {
+        let why = match (out.injuries, out.bans) {
+            (0, _) => "banned",
+            (_, 0) => "injured",
+            _ => "injured and banned",
+        };
+        println!("  left out: {} ({why})", out.player.name);
+    }
+    println!(
+        "\nformations, by how well the squad fits them (0-100, the editor's own measure, {:.0}% of it current ability):",
+        options.ability_weight.clamp(0.0, 1.0) * 100.0
+    );
+    println!("      formation      eleven  cover");
+    for (rank, lineup) in report.lineups.iter().enumerate() {
+        let nobody = |slots: &[fmlibre_core::LineupSlot]| slots.iter().filter(|slot| slot.fitting.is_none()).count();
+        let gap = match (nobody(&lineup.slots), nobody(&lineup.cover)) {
+            (0, 0) => String::new(),
+            (0, cover) => format!("  (no cover for {cover})"),
+            (eleven, _) => format!("  (nobody for {eleven})"),
+        };
+        println!("  {:>2}  {:<14} {:>6.1} {:>6.1}{gap}", rank + 1, lineup.formation, lineup.score, lineup.cover_score);
+    }
+    let shown = report.lineups.iter().enumerate().filter(|(rank, lineup)| match formation {
+        Some(key) => lineup.formation.eq_ignore_ascii_case(key),
+        None => *rank < top,
+    });
+    for (rank, lineup) in shown {
+        println!("\n{} (#{}, {:.1})", lineup.formation, rank + 1, lineup.score);
+        println!(
+            "  pos  player                    CA  rating  fit  ready  score  roles (with / without the ball)  cover"
+        );
+        for (slot, cover) in lineup.slots.iter().zip(&lineup.cover) {
+            let cover = match &cover.fitting {
+                Some(f) => format!("{} {}", clip(&f.player.name, 24), cover.score),
+                None => "nobody".to_owned(),
+            };
+            let Some(f) = &slot.fitting else {
+                println!("  {:<4} nobody", slot.position);
+                continue;
+            };
+            println!(
+                "  {:<4} {:<24} {:>3}  {:>6}  {:>3}  {:>5}  {:>5}  {:<31}  {cover}",
+                slot.position,
+                clip(&f.player.name, 24),
+                f.player.current_ability,
+                f.position_rating,
+                f.fit,
+                slot.readiness,
+                slot.score,
+                format!("{} / {}", f.in_possession_role.unwrap_or("-"), f.out_of_possession_role.unwrap_or("-"))
+            );
+        }
+    }
+    Ok(())
+}
+
 fn clip(text: &str, width: usize) -> String {
     if text.chars().count() <= width {
         return text.to_owned();

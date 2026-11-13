@@ -22,6 +22,7 @@ mod game;
 mod graphics;
 mod health;
 mod index;
+mod lineup;
 mod loans;
 mod locate;
 mod mass;
@@ -80,6 +81,7 @@ pub use game::{GAME_EXE, GAME_PLUGIN, GameInfo, Storefront};
 pub use graphics::{GraphicsCounts, GraphicsIndex, Picture};
 pub use health::{Check, CheckResult, DateEvidence, DateFit, Health, Lock, STRUCTURE};
 pub use index::{Listed, SearchIndex};
+pub use lineup::{ABILITY_WEIGHT, FORMATIONS, Formation, LeftOut, Lineup, LineupOptions, LineupReport, LineupSlot};
 pub use loans::{LoanDetails, LoanEnd, LoanTerms};
 pub use locate::{
     DatePlace, Found, NEAR_GUESS, Place, date_candidates, date_guesses, game_ui_guesses, holds_game_ui,

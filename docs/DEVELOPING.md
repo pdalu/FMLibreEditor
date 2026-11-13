@@ -347,6 +347,8 @@ fmlibre-probe bans 29120248 --lift --restore         # lift a player's bans and 
 fmlibre-probe ties 2000138835                        # secondary nationalities and homegrown status, numbered
 fmlibre-probe tie-set 2000138835 0 --nation 765 --restore   # point tie 0 at England and back: this writes too
 fmlibre-probe teams 680                              # a club's teams: kinds, captains, players' fitness and morale
+fmlibre-probe lineup                                 # the eleven that fits each formation best, for the next match
+fmlibre-probe lineup --full-strength --formation 3-5-2   # one formation's, with the whole squad fully fit
 fmlibre-probe cohesion 680 --raw                     # each senior player's cohesion with the club, and his other entries
 fmlibre-probe familiarity 2188                       # each senior player's record of familiarity, area by area (macOS)
 fmlibre-probe training-history 2188                  # the areas each player's history of training adds up to (macOS)
