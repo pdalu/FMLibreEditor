@@ -22,7 +22,7 @@ use serde::Serialize;
 
 use crate::clubs::ClubSummary;
 use crate::players::{PlayerIndex, PlayerSummary};
-use crate::scouting::{Fitting, Measure, ScoutError, fitting, position_factor};
+use crate::scouting::{Fitting, Measure, Measured, ScoutError, fitting, position_factor};
 use crate::session::Session;
 
 /// A formation: its name and its eleven positions (keys of [`crate::SCOUT_POSITIONS`]), goalkeeper first.
@@ -129,9 +129,15 @@ pub struct LineupReport {
 }
 
 /// A player an eleven can pick, and how much of his fit he brings (0–1).
-struct Candidate<'a> {
-    player: &'a PlayerSummary,
-    readiness: f32,
+pub(crate) struct Candidate<'a> {
+    pub(crate) player: &'a PlayerSummary,
+    pub(crate) readiness: f32,
+}
+
+/// The players of a senior squad an eleven is picked from, and those left out of it.
+pub(crate) struct Squad<'a> {
+    pub(crate) candidates: Vec<Candidate<'a>>,
+    pub(crate) left_out: Vec<LeftOut>,
 }
 
 /// How much of his fit a player brings to the next match, from his energy and match sharpness as stored (0–10000):
@@ -205,6 +211,36 @@ fn ability(player: &PlayerSummary, rating: u8) -> f32 {
     f32::from(player.current_ability.min(200)) / 2.0 * position_factor(rating)
 }
 
+/// What a candidate measured `m` in a position brings to an eleven: his fit and his ability, `weight` of it the
+/// ability, scaled by how ready he is.
+fn worth(candidate: &Candidate<'_>, m: Measured, weight: f32) -> f64 {
+    let both = (1.0 - weight) * f32::from(m.fit) + weight * ability(candidate.player, m.rating);
+    f64::from(both * candidate.readiness)
+}
+
+/// The place of a candidate measured `m` in `position`.
+fn filled(position: &'static str, candidate: &Candidate<'_>, m: Measured, weight: f32) -> LineupSlot {
+    LineupSlot {
+        position,
+        ability: ability(candidate.player, m.rating).round() as u8,
+        readiness: (candidate.readiness * 100.0).round() as u8,
+        score: worth(candidate, m, weight).round() as u8,
+        fitting: Some(fitting(candidate.player, m)),
+    }
+}
+
+/// A place nobody fills.
+pub(crate) fn empty(position: &'static str) -> LineupSlot {
+    LineupSlot { position, fitting: None, ability: 0, readiness: 0, score: 0 }
+}
+
+/// The place of a player who is given: `candidate` in `position`, scored as a picked one is with [`ABILITY_WEIGHT`].
+/// Empty when he cannot play there at all.
+pub(crate) fn placed(position: &'static str, candidate: &Candidate<'_>) -> Result<LineupSlot, ScoutError> {
+    let measured = Measure::for_position(position)?.of(candidate.player);
+    Ok(measured.map_or_else(|| empty(position), |m| filled(position, candidate, m, ABILITY_WEIGHT)))
+}
+
 /// The eleven of `candidates` that fits `formation` best, in the order of its positions, and the mean of its
 /// places' scores.
 fn pick(
@@ -224,10 +260,7 @@ fn pick(
         .iter()
         .map(|row| {
             let score = |k: usize| match (candidates.get(k), row.get(k).copied().flatten()) {
-                (Some(c), Some(m)) => {
-                    let both = (1.0 - weight) * f32::from(m.fit) + weight * ability(c.player, m.rating);
-                    f64::from(both * c.readiness)
-                }
+                (Some(c), Some(m)) => worth(c, m, weight),
                 _ => 0.0,
             };
             (0..columns).map(score).collect()
@@ -241,17 +274,11 @@ fn pick(
         .map(|(slot, &position)| {
             let k = picked[slot];
             // A player who cannot play the position at all fills no place.
-            let filled =
+            let taken =
                 candidates.get(k).zip(measured[slot].get(k).copied().flatten()).filter(|_| scores[slot][k] > 0.0);
-            match filled {
-                Some((c, m)) => LineupSlot {
-                    position,
-                    ability: ability(c.player, m.rating).round() as u8,
-                    readiness: (c.readiness * 100.0).round() as u8,
-                    score: scores[slot][k].round() as u8,
-                    fitting: Some(fitting(c.player, m)),
-                },
-                None => LineupSlot { position, fitting: None, ability: 0, readiness: 0, score: 0 },
+            match taken {
+                Some((c, m)) => filled(position, c, m, weight),
+                None => empty(position),
             }
         })
         .collect();
@@ -262,7 +289,7 @@ fn pick(
 /// The eleven of `candidates` that fits each of `formations` best and the eleven of the others behind it, the
 /// formation that suits them most first, with `ability_weight` of each place's score taken from the player's
 /// current ability.
-fn lineups(
+pub(crate) fn lineups(
     candidates: &[Candidate<'_>],
     formations: &[Formation],
     ability_weight: f32,
@@ -310,23 +337,35 @@ impl Session {
         options: LineupOptions,
         formations: &[Formation],
     ) -> Result<LineupReport, ScoutError> {
+        let Squad { candidates, left_out } = self.squad(club, players, options.full_strength)?;
+        let lineups = lineups(&candidates, formations, options.ability_weight)?;
+        Ok(LineupReport { lineups, available: candidates.len(), left_out })
+    }
+
+    /// The players of the senior squad of `club` an eleven is picked from: for the next match, those who can play,
+    /// as ready as they are now; at full strength, everyone as if fully fit.
+    pub(crate) fn squad<'a>(
+        &self,
+        club: &ClubSummary,
+        players: &'a PlayerIndex,
+        full_strength: bool,
+    ) -> Result<Squad<'a>, ScoutError> {
         let teams = self.club_teams(club, players)?;
-        let mut candidates = Vec::new();
-        let mut left_out = Vec::new();
+        let mut squad = Squad { candidates: Vec::new(), left_out: Vec::new() };
         for member in teams.iter().filter(|team| team.index == 0).flat_map(|team| &team.players) {
             let Some(player) = players.get(member.uid).filter(|_| member.plays_here) else {
                 continue;
             };
-            if options.full_strength {
-                candidates.push(Candidate { player, readiness: 1.0 });
+            if full_strength {
+                squad.candidates.push(Candidate { player, readiness: 1.0 });
             } else if member.injuries > 0 || member.bans > 0 {
-                left_out.push(LeftOut { player: player.clone(), injuries: member.injuries, bans: member.bans });
+                squad.left_out.push(LeftOut { player: player.clone(), injuries: member.injuries, bans: member.bans });
             } else {
-                candidates.push(Candidate { player, readiness: readiness(member.condition, member.match_sharpness) });
+                let readiness = readiness(member.condition, member.match_sharpness);
+                squad.candidates.push(Candidate { player, readiness });
             }
         }
-        let lineups = lineups(&candidates, formations, options.ability_weight)?;
-        Ok(LineupReport { lineups, available: candidates.len(), left_out })
+        Ok(squad)
     }
 }
 

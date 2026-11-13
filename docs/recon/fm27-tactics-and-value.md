@@ -116,7 +116,7 @@ On the Benevento save of 14 September 2026 (Steam build 26385295, Apple silicon)
 pointed at one block: the manager's own (`VERT`, `+0x104` `03 04`) and those of three clubs the game runs, Carrarese,
 Hellas Verona and Sampdoria (style `NULL`, `+0x104` `02 04` or `02 03`, team instructions `0x4000000000000000 0`,
 which read as no instruction set in any area). The Mac layout places the block from that save, and the probe's
-`scout --tactics` reads it; the Scouting tab does not.
+`scout --tactics` and `opponent` read it; the Scouting tab does not.
 
 ### The pairing of the two phases
 
@@ -145,6 +145,30 @@ midfielder). Out of possession: `0x400001` (bit 0 / 22, two goalkeepers), `0x402
 `0x240000` and `0x280000` (bits 18 and 19 / 21, defensive and central midfielders, between PDM and CM), `0x40400000`
 (bit 30 / 22, a central midfielder), `0x80200000` (bit 31 / 21, a central midfielder) and `0x800400000` (bit 35 / 22,
 three wingers and an attacking midfielder).
+
+## The calendar
+
+A match still to play is a `sicomps::FIXTURE`, `0x58` bytes, kept in arrays (22,005 of them on the Benevento save of
+14 September 2026, Steam build 26385295, Apple silicon):
+
+| Offset | Field |
+| --- | --- |
+| `+0x08`, `+0x10` | pointers to the home and the away team (a club's team object: its senior team or another of its teams) |
+| `+0x18` | a pointer in a match already played, zero in the others |
+| `+0x20`, `+0x28` | two pointers, the first the same in every match of a competition, the second the same in every home match of a team (not read further: probably the competition and the stadium) |
+| `+0x3B` | `u8`, the matchday from 0 |
+| `+0x48` | a date, the same in every match of a competition: the day it ends |
+| `+0x4C` | the day of the match, `[u16 day of the year][u16 year]` |
+
+Benevento's senior team had Carrarese away on 19 September 2026 (a Saturday) and Cesena at home on 10 October, then
+the rest of the league season and a cup match on 15 December. Of the matchdays already played only the first was
+still there. A match close in time is there more than once, the copies alike but for a byte at `+0x37` (and, in one
+of Carrarese's six, at `+0x46`). The dates were not checked against the game's schedule screen, and the layout was
+not looked for on Windows.
+
+For Carrarese the match engine already held a selection (four copies, with a tactic block) five days before the
+match; for Cesena, four weeks away, only objects without a sound list. Whether a club fields the eleven the game
+holds for it beforehand is not checked.
 
 ### Not found yet
 

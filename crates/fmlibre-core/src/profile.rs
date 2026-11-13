@@ -44,6 +44,9 @@ pub struct Layout {
     /// The tactics each human manager keeps for each of his teams; only in the layouts they have been checked in.
     #[serde(default)]
     pub tactics: Option<TacticsLayout>,
+    /// A match of a competition's calendar; only in the layouts it has been checked in.
+    #[serde(default)]
+    pub fixture: Option<FixtureLayout>,
     /// How well players know a tactic, and the history of training the game keeps for it; only in the layouts it has
     /// been checked in.
     #[serde(default)]
@@ -234,6 +237,20 @@ pub struct TacticLayout {
     /// formation. Only in the layouts it has been checked in; without it the two run in the same order.
     #[serde(default)]
     pub pairing: Option<u64>,
+}
+
+/// A match of a competition's calendar (`class`, found by its name: see [`crate::rtti`]): the two teams as pointers
+/// to the clubs' team objects, and the day it is played. The game drops a match from the calendar once it is played.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixtureLayout {
+    /// The class, as written in C++.
+    pub class: String,
+    /// Pointers to the home and the away team.
+    pub home: u64,
+    pub away: u64,
+    /// The day: `[u16 day of the year][u16 year]`.
+    pub date: u64,
 }
 
 /// The tactics each human manager keeps for each of his teams, as the game reads them to tell how well the players

@@ -29,6 +29,7 @@ mod mass;
 mod medical;
 mod names;
 mod object_pool;
+mod opponent;
 mod own_memory;
 mod players;
 mod prize_money;
@@ -91,14 +92,15 @@ pub use mass::{Operation, Plan, Planned, Skipped};
 pub use medical::{Ban, HealPlan, Healed, Injury, LiftPlan, Lifted};
 pub use names::{LONGEST_PERSON_NAME, NameChange, NameKind, PersonNames};
 pub use object_pool::ObjectPool;
+pub use opponent::{Eleven, ElevenSlot, Fixture, Matchup, NextMatch, ZONES, Zone};
 pub use players::{Nation, PLAYABLE_RATING, PlayerIndex, PlayerSummary, is_woman, nations, read_players};
 pub use prize_money::{
     Competition, MOST_PRIZE, PrizeAmount, PrizeChange, PrizeEdit, PrizeError, PrizeMoney, PrizeStage,
 };
 pub use profile::{
-    ArrayRvas, BuildProfile, ContractLayout, GameLayout, Layout, PlayerLayout, PluginFingerprint, ProfileNotes,
-    SelectionLayout, StaffLayout, TacticLayout, TacticsLayout, built_in_profiles, layout_for, profile_for,
-    profile_text,
+    ArrayRvas, BuildProfile, ContractLayout, FixtureLayout, GameLayout, Layout, PlayerLayout, PluginFingerprint,
+    ProfileNotes, SelectionLayout, StaffLayout, TacticLayout, TacticsLayout, built_in_profiles, layout_for,
+    profile_for, profile_text,
 };
 pub use relations::{HOMEGROWN_RULES, Relation, RelationPlan, RelationSet, Tie, TieTarget};
 pub use retirement::{PlannedRetirement, RetirementPlan, RetirementSet};

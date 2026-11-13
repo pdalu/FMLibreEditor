@@ -13,12 +13,13 @@ use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use fmlibre_core::{
     ABILITY_WEIGHT, ATTRIBUTE_GROUPS, ArrayCandidate, ArrayRvas, ArraySource, AttributeBound, BuildProfile, Buyer,
-    CaptainRole, ClubIndex, Entity, ExportFormat, ExportHeader, Exported, Field, FmDate, Found, GAME_EXE, GAME_PLUGIN,
-    GameInfo, GraphicsIndex, Kind, LineupOptions, Loan, MANAGER, MoveTerms, NameKind, PERSONALITY, POSITIONS,
-    PersonNames, Picture, PlayerFilter, PlayerIndex, PlayerOrder, PlayerSort, PrizeAmount, PrizeMoney, PrizeStage,
-    ProfileNotes, Purpose, STAFF_ATTRIBUTE_GROUPS, SUPPORTER_MIX, SUPPORTER_TRAITS, Scale, ScanOptions, ScoutOrder,
-    ScoutRequest, Session, SessionError, StaffIndex, Target, Tie, TieTarget, date_line, diagnostics_report, find_game,
-    job_name, nations, profile_text, retirement_line, saves_loaded_line, scan_object_arrays, sort_players,
+    CaptainRole, ClubIndex, Eleven, Entity, ExportFormat, ExportHeader, Exported, Field, Fixture, FmDate, Found,
+    GAME_EXE, GAME_PLUGIN, GameInfo, GraphicsIndex, Kind, LineupOptions, Loan, MANAGER, MoveTerms, NameKind,
+    PERSONALITY, POSITIONS, PersonNames, Picture, PlayerFilter, PlayerIndex, PlayerOrder, PlayerSort, PrizeAmount,
+    PrizeMoney, PrizeStage, ProfileNotes, Purpose, STAFF_ATTRIBUTE_GROUPS, SUPPORTER_MIX, SUPPORTER_TRAITS, Scale,
+    ScanOptions, ScoutOrder, ScoutRequest, Session, SessionError, StaffIndex, Target, Tie, TieTarget, ZONES, Zone,
+    date_line, diagnostics_report, find_game, job_name, nations, profile_text, retirement_line, saves_loaded_line,
+    scan_object_arrays, sort_players,
 };
 #[cfg(target_os = "macos")]
 use fmlibre_mem::MachImage;
@@ -581,6 +582,19 @@ enum Command {
         /// Show the tactics the manager plays (a pass over the game's memory).
         #[arg(long)]
         tactics: bool,
+    },
+    /// A club's next match and its squad against the opponent's eleven: the matches left in the calendar, the
+    /// eleven and the roles the game holds for the opponent (or, when it holds none, the eleven the editor picks for
+    /// its squad), its injured and banned players, and for the tactic in use and each of the editor's formations how
+    /// many players each side has on the left, in the centre and on the right, and what their scores add up to. The
+    /// scores are the editor's own measure, as in `lineup`, not the match engine's. Only reads memory.
+    Opponent {
+        /// UID of the club; without it, the human manager's.
+        #[arg(long)]
+        club: Option<u32>,
+        /// How many of the matches after the next to list.
+        #[arg(long, default_value_t = 3)]
+        later: usize,
     },
     /// The eleven of a club's senior squad that fits each of the editor's formations best, the formation that suits
     /// the squad most first, and the eleven of the players it leaves out, as its cover: for the next match (injured
@@ -1426,6 +1440,7 @@ fn run(cli: Cli) -> Result<()> {
             });
             scout(&session, club, request, squad, tactics)
         }
+        Command::Opponent { club, later } => opponent(&connect(process, ArraySource::ProfileFirst)?, club, later),
         Command::Lineup { club, formation, top, full_strength, ability_weight } => {
             let session = connect(process, ArraySource::ProfileFirst)?;
             lineup(&session, club, formation.as_deref(), top, LineupOptions { full_strength, ability_weight })
@@ -6482,6 +6497,161 @@ fn lineup(
                 format!("{} / {}", f.in_possession_role.unwrap_or("-"), f.out_of_possession_role.unwrap_or("-"))
             );
         }
+    }
+    Ok(())
+}
+
+/// Why a player is out, from his injuries and bans.
+fn out_of_action(injuries: usize, bans: usize) -> &'static str {
+    match (injuries, bans) {
+        (0, _) => "banned",
+        (_, 0) => "injured",
+        _ => "injured and banned",
+    }
+}
+
+fn opponent(session: &Session, club: Option<u32>, later: usize) -> Result<()> {
+    let players = PlayerIndex::new(session.players()?);
+    let clubs = ClubIndex::new(session.clubs()?);
+    let human = session.staff()?.iter().filter(|s| s.is_human).find_map(|s| s.club_uid);
+    let uid = club.or(human).context("no club given and no human manager with a club")?;
+    let club = clubs.get(uid).with_context(|| format!("no club with UID {uid}"))?;
+    let started = Instant::now();
+    let Some(report) = session.next_match(club, &clubs, &players)? else {
+        println!("{}: no match left in the calendar", club.name);
+        return Ok(());
+    };
+    let name = |uid: u32| clubs.get(uid).map_or("?", |club| club.name.as_str());
+    let date = |date: FmDate| format!("{:04}-{:02}-{:02}", date.year, date.month, date.day);
+    let line = |fixture: &Fixture| {
+        if fixture.home == club.uid {
+            format!("{}  at home to {}", date(fixture.date), name(fixture.away))
+        } else {
+            format!("{}  away at {}", date(fixture.date), name(fixture.home))
+        }
+    };
+    let today = session.game_date();
+    let next = &report.fixtures[0];
+    let wait = today.map(|today| next.date.to_number() - today.to_number());
+    println!("{} (read in {:.1} s)", club.name, started.elapsed().as_secs_f64());
+    println!(
+        "next match: {}{}",
+        line(next),
+        match wait {
+            Some(0) => " (today)".to_owned(),
+            Some(days) => format!(" (in {days} days)"),
+            None => String::new(),
+        }
+    );
+    for fixture in report.fixtures.iter().skip(1).take(later) {
+        println!("      then: {}", line(fixture));
+    }
+
+    let print_eleven = |eleven: &Eleven| {
+        println!("  pos  player                    CA  rating  ready  score  roles (with / without the ball)");
+        for slot in &eleven.slots {
+            let Some(f) = &slot.place.fitting else {
+                println!("  {:<4} nobody", slot.place.position);
+                continue;
+            };
+            // The roles the game holds, or the ones that suit him best in brackets.
+            let role = |held: Option<&str>, suits: Option<&str>| match (held, suits) {
+                (Some(held), _) => held.to_owned(),
+                (None, _) if eleven.copies > 0 => "?".to_owned(),
+                (None, suits) => format!("({})", suits.unwrap_or("-")),
+            };
+            println!(
+                "  {:<4} {:<24} {:>3}  {:>6}  {:>5}  {:>5}  {}{}",
+                slot.place.position,
+                clip(&f.player.name, 24),
+                f.player.current_ability,
+                f.position_rating,
+                slot.place.readiness,
+                slot.place.score,
+                format_args!(
+                    "{} / {}",
+                    role(slot.in_possession, f.in_possession_role),
+                    role(slot.out_of_possession, f.out_of_possession_role)
+                ),
+                if slot.injuries + slot.bans > 0 {
+                    format!("  ** {} **", out_of_action(slot.injuries, slot.bans))
+                } else {
+                    String::new()
+                }
+            );
+        }
+    };
+
+    let theirs = &report.eleven;
+    println!(
+        "\n{}: {}, {} (score {:.1})",
+        report.opponent.name,
+        match theirs.copies {
+            0 => "the game holds no eleven for it; the editor's pick".to_owned(),
+            copies => format!("the eleven the game holds ({copies} copies)"),
+        },
+        theirs.shape,
+        theirs.score
+    );
+    print_eleven(theirs);
+    if report.other_elevens > 0 {
+        println!("  the game holds {} other eleven(s) for it", report.other_elevens);
+    }
+    for out in &report.absent {
+        println!(
+            "  out: {} ({}, CA {})",
+            out.player.name,
+            out_of_action(out.injuries, out.bans),
+            out.player.current_ability
+        );
+    }
+    let filled: Vec<String> = ZONES
+        .iter()
+        .zip(&theirs.zones)
+        .map(|(name, zone)| format!("{name} {} ({:.0})", zone.men, zone.strength))
+        .collect();
+    println!("  its {}: players (their scores added up)", filled.join(", "));
+
+    // Ours against theirs in each zone: the players of each and the difference of their scores.
+    let duels = |ours: &[Zone; 5]| {
+        let duel = |(ours, theirs): (&Zone, &Zone)| {
+            format!("{:<9}", format!("{}v{} {:+.0}", ours.men, theirs.men, ours.strength - theirs.strength))
+        };
+        ours.iter().zip(&report.facing).map(duel).collect::<Vec<_>>().join(" ")
+    };
+    println!(
+        "\n{}: {} to pick from. Players v players in each zone, and the difference of their scores:",
+        club.name, report.available
+    );
+    println!("  (our left v its right, our right v its left, our centre-backs v its strikers, the central");
+    println!("  midfields, our strikers v its centre-backs)");
+    for out in &report.left_out {
+        println!("  left out: {} ({})", out.player.name, out_of_action(out.injuries, out.bans));
+    }
+    println!("      formation      eleven  cover  left      right     back      midfield  front");
+    if let Some(in_use) = &report.in_use {
+        println!(
+            "  **  {:<14} {:>6.1}      -  {}  the eleven and tactic in use{}",
+            in_use.shape,
+            in_use.score,
+            duels(&in_use.zones),
+            in_use.style.as_ref().map(|style| format!(" ({style})")).unwrap_or_default()
+        );
+    }
+    for (rank, matchup) in report.matchups.iter().enumerate() {
+        let lineup = &matchup.lineup;
+        println!(
+            "  {:>2}  {:<14} {:>6.1} {:>6.1}  {}",
+            rank + 1,
+            lineup.formation,
+            lineup.score,
+            lineup.cover_score,
+            duels(&matchup.zones)
+        );
+    }
+    if let Some(in_use) = &report.in_use {
+        println!("\nthe eleven in use, {}:", in_use.shape);
+        print_eleven(in_use);
     }
     Ok(())
 }

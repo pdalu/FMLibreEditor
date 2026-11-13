@@ -368,6 +368,19 @@ role = 0x10               # in a slot: the u64 role mask
 style = 0x100
 pairing = 0x7B4
 
+# A match of a competition's calendar. Read on the Benevento save (14 September 2026, Steam build 26385295, Apple
+# silicon): 22,005 objects of 0x58 bytes, kept in arrays. The two teams are pointers to the clubs' team objects (the
+# senior team's for its matches, another team's for that team's); the day is the match's own, next to the day the
+# competition ends (+0x48, the same in every match of it). Benevento's senior team had Carrarese away on 19 September
+# 2026, a Saturday, and Cesena at home on 10 October; of the matches already played only the first was still there,
+# with a pointer at +0x18 the others do not have. The game keeps more than one copy of a match that is close. Not yet
+# checked against the game's schedule screen.
+[fixture]
+class = "sicomps::FIXTURE"
+home = 0x08
+away = 0x10
+date = 0x4C
+
 # The tactics each human manager keeps for each of his teams, which the game reads to tell how well the players know
 # the tactic in use (game_plugin+0x2039c64 and +0x2ce4aec, Steam build 26340721). The build profile's tactics_manager
 # leads to an object listing one object per human manager; each has a map from a team's id (the team's u32 at +0x08)
