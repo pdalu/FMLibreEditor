@@ -585,9 +585,10 @@ enum Command {
     },
     /// A club's next match and its squad against the opponent's eleven: the matches left in the calendar, the
     /// eleven and the roles the game holds for the opponent (or, when it holds none, the eleven the editor picks for
-    /// its squad), its injured and banned players, and for the tactic in use and each of the editor's formations how
-    /// many players each side has on the left, in the centre and on the right, and what their scores add up to. The
-    /// scores are the editor's own measure, as in `lineup`, not the match engine's. Only reads memory.
+    /// its squad), its injured and banned players, and for each tactic the manager keeps and each of the editor's
+    /// formations how many players each side has in five zones (the flanks, the centre-backs against the strikers,
+    /// the central midfields) and what their scores add up to. The scores are the editor's own measure, as in
+    /// `lineup`, not the match engine's. Only reads memory.
     Opponent {
         /// UID of the club; without it, the human manager's.
         #[arg(long)]
@@ -6636,16 +6637,39 @@ fn opponent(session: &Session, club: Option<u32>, later: usize) -> Result<()> {
     for out in &report.left_out {
         println!("  left out: {} ({})", out.player.name, out_of_action(out.injuries, out.bans));
     }
-    println!("      formation      eleven  cover  left      right     back      midfield  front");
-    if let Some(in_use) = &report.in_use {
+    let header = "formation      eleven  cover  left      right     back      midfield  front";
+    match report.tactics.len() {
+        0 => println!("\nthe game holds no tactic of the club's manager"),
+        kept => println!("\nthe {kept} tactic(s) the manager keeps for the team (* the one in use):"),
+    }
+    if !report.tactics.is_empty() {
+        println!("      {header}");
+    }
+    for (index, tactic) in report.tactics.iter().enumerate() {
+        let style = tactic.style.as_ref().map(|style| format!(" ({style})")).unwrap_or_default();
+        if let Some(picked) = &tactic.picked {
+            println!(
+                "  T{}* {:<14} {:>6.1}      -  {}  the eleven picked{style}",
+                index + 1,
+                tactic.shape,
+                picked.score,
+                duels(&picked.zones)
+            );
+        }
+        let best = &tactic.best.lineup;
         println!(
-            "  **  {:<14} {:>6.1}      -  {}  the eleven and tactic in use{}",
-            in_use.shape,
-            in_use.score,
-            duels(&in_use.zones),
-            in_use.style.as_ref().map(|style| format!(" ({style})")).unwrap_or_default()
+            "  T{}{} {:<14} {:>6.1} {:>6.1}  {}  the best eleven for it{}",
+            index + 1,
+            if tactic.in_use { "*" } else { " " },
+            tactic.shape,
+            best.score,
+            best.cover_score,
+            duels(&tactic.best.zones),
+            if tactic.picked.is_some() { String::new() } else { style }
         );
     }
+    println!("\nthe editor's formations, each with the best eleven for it:");
+    println!("      {header}");
     for (rank, matchup) in report.matchups.iter().enumerate() {
         let lineup = &matchup.lineup;
         println!(
@@ -6657,9 +6681,34 @@ fn opponent(session: &Session, club: Option<u32>, later: usize) -> Result<()> {
             duels(&matchup.zones)
         );
     }
-    if let Some(in_use) = &report.in_use {
-        println!("\nthe eleven in use, {}:", in_use.shape);
-        print_eleven(in_use);
+    for (index, tactic) in report.tactics.iter().enumerate() {
+        let Some(picked) = &tactic.picked else {
+            continue;
+        };
+        println!("\nthe eleven picked, tactic {} ({}):", index + 1, tactic.shape);
+        print_eleven(picked);
+        // Where the best eleven for the tactic has someone else.
+        let named =
+            |slot: &fmlibre_core::LineupSlot| slot.fitting.as_ref().map(|f| (f.player.uid, f.player.name.clone()));
+        let chosen: Vec<u32> = picked.slots.iter().filter_map(|slot| named(&slot.place)).map(|(uid, _)| uid).collect();
+        let best: Vec<_> = tactic.best.lineup.slots.iter().filter_map(|slot| Some((slot, named(slot)?))).collect();
+        let fresh: Vec<String> = best
+            .iter()
+            .filter(|(_, (uid, _))| !chosen.contains(uid))
+            .map(|(slot, (_, name))| format!("{name} ({}, {})", slot.position, slot.score))
+            .collect();
+        let dropped: Vec<String> = picked
+            .slots
+            .iter()
+            .filter_map(|slot| Some((slot, named(&slot.place)?)))
+            .filter(|(_, (uid, _))| !best.iter().any(|(_, (other, _))| other == uid))
+            .map(|(slot, (_, name))| format!("{name} ({}, {})", slot.place.position, slot.place.score))
+            .collect();
+        if fresh.is_empty() {
+            println!("  the best eleven for it has the same players");
+        } else {
+            println!("  the best eleven for it has {} in for {}", fresh.join(", "), dropped.join(", "));
+        }
     }
     Ok(())
 }

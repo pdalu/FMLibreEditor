@@ -92,7 +92,7 @@ pub use mass::{Operation, Plan, Planned, Skipped};
 pub use medical::{Ban, HealPlan, Healed, Injury, LiftPlan, Lifted};
 pub use names::{LONGEST_PERSON_NAME, NameChange, NameKind, PersonNames};
 pub use object_pool::ObjectPool;
-pub use opponent::{Eleven, ElevenSlot, Fixture, Matchup, NextMatch, ZONES, Zone};
+pub use opponent::{Eleven, ElevenSlot, Fixture, KeptTactic, Matchup, NextMatch, ZONES, Zone};
 pub use players::{Nation, PLAYABLE_RATING, PlayerIndex, PlayerSummary, is_woman, nations, read_players};
 pub use prize_money::{
     Competition, MOST_PRIZE, PrizeAmount, PrizeChange, PrizeEdit, PrizeError, PrizeMoney, PrizeStage,
@@ -126,7 +126,7 @@ pub use staff::{
 pub use staff_move::{
     DIRECTOR_OF_FOOTBALL, Department, MANAGER, NewStaffContract, Post, STAFF_JOBS, StaffChange, StaffPlan, post_of,
 };
-pub use tactical_areas::area_options;
+pub use tactical_areas::{TeamTactics, area_options};
 pub use text::{fold, is_name_like, read_fm_string, read_name_entry};
 pub use transfer::{Amounts, ClubMoney, ClubMove, FeePlan, MAX_FEE, MoveError, MovePlan, MoveTerms, Paid, RoomMaker};
 pub use tree::Tree;

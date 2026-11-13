@@ -358,8 +358,10 @@ player_person = 0x390
 # is the eleven bytes after a 0x1B at +0x7B3: for each in-possession slot, the out-of-possession slot of the same
 # place. Carrarese's read 0 1 2 3 4 6 7 5 8 9 10, which makes the left wing-back (AWB with the ball) an HWB without it
 # and the defensive midfielder a PDM; read slot for slot, the wing-back would defend as a PDM and a central midfielder
-# as an HWB. On the Arsenal save (4 July 2027) each of the manager's selections listed two blocks, and the second
-# matched its eleven: which of two the game plays is not checked, and the editor reads the first.
+# as an HWB. A selection lists one block for each tactic its manager keeps, and the byte after the list is the index
+# of the one he plays, as `[tactics]` reads it: 0 in every selection of that save, each with one block. On the Arsenal
+# save (4 July 2027) each of the manager's selections listed two blocks, and the second matched its eleven; the byte
+# was not read then.
 [tactic]
 in_possession = 0x150
 out_of_possession = 0x470

@@ -746,88 +746,38 @@ impl Session {
         club: &ClubSummary,
         players: &PlayerIndex,
     ) -> Result<Vec<ClubTactic>, ScoutError> {
-        let (Some(selection), Some(tactic)) = (&self.layout.selection, &self.layout.tactic) else {
+        let Some(selection) = &self.layout.selection else {
             return Err(ScoutError::NotPlaced);
         };
-        let p = &self.layout.player;
-        // The club's players by the id the game gives people.
-        let mut people: HashMap<u32, &PlayerSummary> = HashMap::new();
-        for player in players.iter().filter(|player| player.club_uid == Some(club.uid)) {
-            if let Ok(id) = self.process.read_u32(player.address + p.at(selection.player_person, player.shift)) {
-                people.insert(id, player);
-            }
-        }
-        if people.is_empty() {
-            return Err(ScoutError::NoTactic { club: club.uid });
-        }
+        let people = self.people_of(club, players)?;
+        // The byte after a selection's list is the index of the tactic it plays, where the layout places the two.
+        let in_use = self.layout.tactics.as_ref().map(|t| selection.list + (t.current - t.tactics));
 
         let mut tactics: Vec<(Vec<u8>, Vec<u32>, ClubTactic)> = Vec::new();
         for &object in selections {
             let Some(list) = PointerList::read(&self.process, object + selection.list)? else {
                 continue;
             };
-            let Some(&block) = list.elements(&self.process)?.first() else {
+            let blocks = list.elements(&self.process)?;
+            let index = in_use.and_then(|at| self.process.read_bytes(object + at, 1).ok()).map_or(0, |byte| byte[0]);
+            let Some(&block) = blocks.get(usize::from(index)).or(blocks.first()) else {
                 continue;
             };
-            let Ok(raw) = self.process.read_bytes(object + selection.slots, 11 * 4) else {
+            let Some(eleven) = self.selection_eleven(object) else {
                 continue;
             };
-            let eleven: Vec<u32> = raw.as_chunks::<4>().0.iter().map(|slot| u32::from_le_bytes(*slot)).collect();
             let filled = eleven.iter().filter(|&&slot| slot != EMPTY).count();
             let ours = eleven.iter().filter(|slot| people.contains_key(slot)).count();
-            if filled == 0 || 2 * ours <= filled || !is_user_pointer(block) {
+            if filled == 0 || 2 * ours <= filled {
                 continue;
             }
-            let span = tactic.out_of_possession + 10 * tactic.slot_size + tactic.role + 8;
-            let Ok(bytes) = self.process.read_bytes(block, span as usize) else {
+            let Some((key, tactic)) = self.read_tactic(block, &eleven, &people) else {
                 continue;
             };
-            let mask = |first: u64, k: u64| {
-                let at = (first + k * tactic.slot_size + tactic.role) as usize;
-                u64::from_le_bytes(bytes[at..at + 8].try_into().expect("8 bytes"))
-            };
-            let ip: Vec<u64> = (0..11).map(|k| mask(tactic.in_possession, k)).collect();
-            let oop: Vec<u64> = (0..11).map(|k| mask(tactic.out_of_possession, k)).collect();
-            // The out-of-possession slots in the order of the in-possession ones, where the layout pairs them.
-            let paired = tactic.pairing.and_then(|at| self.process.read_bytes(block + at, 11).ok());
-            let oop: Vec<u64> = match paired.as_deref().and_then(pairing) {
-                Some(order) => order.iter().map(|&slot| oop[slot]).collect(),
-                None => oop,
-            };
-            // A block the game has given up holds something else.
-            if ip.iter().chain(&oop).filter(|&&mask| looks_like_role(mask)).count() < 18 {
-                continue;
+            match tactics.iter_mut().find(|(k, slots, _)| *k == key && *slots == eleven) {
+                Some((_, _, known)) => known.copies += 1,
+                None => tactics.push((key, eleven, tactic)),
             }
-            let key: Vec<u8> = ip.iter().chain(&oop).flat_map(|mask| mask.to_le_bytes()).collect();
-            if let Some((_, _, known)) = tactics.iter_mut().find(|(k, slots, _)| *k == key && *slots == eleven) {
-                known.copies += 1;
-                continue;
-            }
-            let style = bytes
-                .get(tactic.style as usize..tactic.style as usize + 4)
-                .map(|code| code.iter().rev().map(|&b| b as char).collect::<String>())
-                .filter(|code| code.chars().all(|c| c.is_ascii_uppercase()));
-            let slots = (0..11)
-                .map(|k| {
-                    let in_possession = role_of_mask(Phase::InPossession, ip[k]);
-                    let out_of_possession = role_of_mask(Phase::OutOfPossession, oop[k]);
-                    let line = in_possession.or(out_of_possession).map(|role| role.line);
-                    let player = people.get(&eleven[k]).copied();
-                    let side = line.zip(player).and_then(|(line, player)| side_of(line, &player.position_ratings));
-                    TacticSlot {
-                        index: k,
-                        in_possession: in_possession.map(|role| role.key),
-                        out_of_possession: out_of_possession.map(|role| role.key),
-                        in_possession_mask: format!("{:x}", ip[k]),
-                        out_of_possession_mask: format!("{:x}", oop[k]),
-                        line,
-                        side,
-                        position: line.and_then(|line| position_of(line, side)),
-                        player: player.map(|player| player.uid),
-                    }
-                })
-                .collect();
-            tactics.push((key, eleven, ClubTactic { style, slots, copies: 1 }));
         }
         if tactics.is_empty() {
             return Err(ScoutError::NoTactic { club: club.uid });
@@ -835,6 +785,124 @@ impl Session {
         let mut out: Vec<ClubTactic> = tactics.into_iter().map(|(_, _, tactic)| tactic).collect();
         out.sort_by_key(|tactic| std::cmp::Reverse(tactic.copies));
         Ok(out)
+    }
+
+    /// The tactics the human manager keeps for the senior team of `club`, in the game's order, each with the eleven
+    /// he has picked in its places, and the index of the one he plays. `None` when no human manager picks the
+    /// team's tactics, or the layout does not place them. Reads them where the game keeps them: no pass over its
+    /// memory.
+    pub fn kept_tactics(
+        &self,
+        club: &ClubSummary,
+        players: &PlayerIndex,
+    ) -> Result<Option<(Vec<ClubTactic>, usize)>, ScoutError> {
+        let (Some(selection), Some(t)) = (&self.layout.selection, &self.layout.tactics) else {
+            return Ok(None);
+        };
+        let Some(&team) = self.team_objects(club)?.first() else {
+            return Ok(None);
+        };
+        let Some(kept) = self.team_tactics(team)? else {
+            return Ok(None);
+        };
+        // The list of tactics is a selection's own: its slots are the eleven the manager has picked.
+        let Some(eleven) = self.selection_eleven(kept.at + t.tactics - selection.list) else {
+            return Ok(None);
+        };
+        let people = self.people_of(club, players)?;
+        let mut tactics = Vec::new();
+        let mut current = None;
+        for (index, &block) in kept.blocks.iter().enumerate() {
+            if let Some((_, tactic)) = self.read_tactic(block, &eleven, &people) {
+                if index == kept.current {
+                    current = Some(tactics.len());
+                }
+                tactics.push(tactic);
+            }
+        }
+        Ok(current.map(|current| (tactics, current)))
+    }
+
+    /// The players of `club` by the id the game gives people.
+    fn people_of<'a>(
+        &self,
+        club: &ClubSummary,
+        players: &'a PlayerIndex,
+    ) -> Result<HashMap<u32, &'a PlayerSummary>, ScoutError> {
+        let (Some(selection), p) = (&self.layout.selection, &self.layout.player) else {
+            return Err(ScoutError::NotPlaced);
+        };
+        let mut people = HashMap::new();
+        for player in players.iter().filter(|player| player.club_uid == Some(club.uid)) {
+            if let Ok(id) = self.process.read_u32(player.address + p.at(selection.player_person, player.shift)) {
+                people.insert(id, player);
+            }
+        }
+        if people.is_empty() { Err(ScoutError::NoTactic { club: club.uid }) } else { Ok(people) }
+    }
+
+    /// The person ids in the first eleven slots of the selection at `object`.
+    fn selection_eleven(&self, object: u64) -> Option<Vec<u32>> {
+        let selection = self.layout.selection.as_ref()?;
+        let raw = self.process.read_bytes(object + selection.slots, 11 * 4).ok()?;
+        Some(raw.as_chunks::<4>().0.iter().map(|slot| u32::from_le_bytes(*slot)).collect())
+    }
+
+    /// The tactic in the block at `block`, with the players of `eleven` in its places, and its roles' masks as its
+    /// key. `None` for a block that holds something else, as one the game has given up.
+    fn read_tactic(
+        &self,
+        block: u64,
+        eleven: &[u32],
+        people: &HashMap<u32, &PlayerSummary>,
+    ) -> Option<(Vec<u8>, ClubTactic)> {
+        let tactic = self.layout.tactic.as_ref()?;
+        if !is_user_pointer(block) {
+            return None;
+        }
+        let span = tactic.out_of_possession + 10 * tactic.slot_size + tactic.role + 8;
+        let bytes = self.process.read_bytes(block, span as usize).ok()?;
+        let mask = |first: u64, k: u64| {
+            let at = (first + k * tactic.slot_size + tactic.role) as usize;
+            u64::from_le_bytes(bytes[at..at + 8].try_into().expect("8 bytes"))
+        };
+        let ip: Vec<u64> = (0..11).map(|k| mask(tactic.in_possession, k)).collect();
+        let oop: Vec<u64> = (0..11).map(|k| mask(tactic.out_of_possession, k)).collect();
+        // The out-of-possession slots in the order of the in-possession ones, where the layout pairs them.
+        let paired = tactic.pairing.and_then(|at| self.process.read_bytes(block + at, 11).ok());
+        let oop: Vec<u64> = match paired.as_deref().and_then(pairing) {
+            Some(order) => order.iter().map(|&slot| oop[slot]).collect(),
+            None => oop,
+        };
+        if ip.iter().chain(&oop).filter(|&&mask| looks_like_role(mask)).count() < 18 {
+            return None;
+        }
+        let key: Vec<u8> = ip.iter().chain(&oop).flat_map(|mask| mask.to_le_bytes()).collect();
+        let style = bytes
+            .get(tactic.style as usize..tactic.style as usize + 4)
+            .map(|code| code.iter().rev().map(|&b| b as char).collect::<String>())
+            .filter(|code| code.chars().all(|c| c.is_ascii_uppercase()));
+        let slots = (0..11)
+            .map(|k| {
+                let in_possession = role_of_mask(Phase::InPossession, ip[k]);
+                let out_of_possession = role_of_mask(Phase::OutOfPossession, oop[k]);
+                let line = in_possession.or(out_of_possession).map(|role| role.line);
+                let player = eleven.get(k).and_then(|id| people.get(id)).copied();
+                let side = line.zip(player).and_then(|(line, player)| side_of(line, &player.position_ratings));
+                TacticSlot {
+                    index: k,
+                    in_possession: in_possession.map(|role| role.key),
+                    out_of_possession: out_of_possession.map(|role| role.key),
+                    in_possession_mask: format!("{:x}", ip[k]),
+                    out_of_possession_mask: format!("{:x}", oop[k]),
+                    line,
+                    side,
+                    position: line.and_then(|line| position_of(line, side)),
+                    player: player.map(|player| player.uid),
+                }
+            })
+            .collect();
+        Some((key, ClubTactic { style, slots, copies: 1 }))
     }
 }
 

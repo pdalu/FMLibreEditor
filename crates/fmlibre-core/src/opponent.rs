@@ -16,6 +16,10 @@
 //! centre-backs. For each, how many players each side has there and what their places' scores add up to. It says
 //! where a formation puts more players, or better ones, than the opponent has, not how the match will go.
 //!
+//! The club's own side is measured twice: for each tactic its manager keeps for the team (a human manager's up to
+//! three, read where the game keeps them), and for each of the editor's formations. A tactic the manager plays also
+//! has the eleven he has picked; every tactic and formation has the best eleven the squad has for it.
+//!
 //! Everything here only reads memory.
 
 use serde::Serialize;
@@ -24,7 +28,7 @@ use crate::clubs::{ClubIndex, ClubSummary};
 use crate::date::FmDate;
 use crate::details::POSITIONS;
 use crate::lineup::{
-    ABILITY_WEIGHT, Candidate, FORMATIONS, LeftOut, Lineup, LineupSlot, Squad, empty, lineups, placed,
+    ABILITY_WEIGHT, Candidate, FORMATIONS, Formation, LeftOut, Lineup, LineupSlot, Squad, empty, lineups, placed,
 };
 use crate::players::{PlayerIndex, PlayerSummary};
 use crate::rtti;
@@ -97,6 +101,23 @@ pub struct Matchup {
     pub zones: [Zone; 5],
 }
 
+/// One of the tactics the club's manager keeps for the team, against the opponent's eleven.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeptTactic {
+    /// Whether it is the one he plays.
+    pub in_use: bool,
+    /// The style it was made from, as the game codes it.
+    pub style: Option<String>,
+    /// Its formation, as [`Eleven::shape`].
+    pub shape: String,
+    /// The eleven he has picked, in its places: for the tactic he plays. The game keeps one eleven for all his
+    /// tactics, and the editor has not seen where it puts each player when he changes to another.
+    pub picked: Option<Eleven>,
+    /// The club's best eleven for its positions, the cover behind it, and how the eleven fills the zones.
+    pub best: Matchup,
+}
+
 /// A club's next match and how its squad meets the opponent's eleven.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,14 +137,18 @@ pub struct NextMatch {
     /// The opponent's zones in the order the club's meet them: its right, its left, its front, its midfield and its
     /// back.
     pub facing: [Zone; 5],
-    /// The eleven and the tactic the club's manager has picked, when the game holds them.
-    pub in_use: Option<Eleven>,
+    /// The tactics the club's manager keeps for the team, in the game's order: up to three for a human manager, the
+    /// one the game holds for a club it runs, none when it holds none.
+    pub tactics: Vec<KeptTactic>,
     /// How many players the club's elevens were picked from, and those left out.
     pub available: usize,
     pub left_out: Vec<LeftOut>,
     /// The editor's formations with the club's best eleven for each, the one that suits the squad most first.
     pub matchups: Vec<Matchup>,
 }
+
+/// What the elevens picked for a manager's tactics are called, in the game's order.
+const KEPT: [&str; 4] = ["tactic 1", "tactic 2", "tactic 3", "tactic"];
 
 /// The positions a place can be when its roles say nothing, in the order ties go: from the back, the middle first.
 const ORDER: [&str; 14] = ["gk", "dc", "dr", "dl", "wbr", "wbl", "dm", "mc", "mr", "ml", "amc", "amr", "aml", "st"];
@@ -342,7 +367,31 @@ impl Session {
         let [left, right, back, midfield, front] = eleven.zones;
 
         let ours = self.squad(club, players, false)?;
-        let in_use = tactics(club)?.first().map(|tactic| held(tactic, &ours, players)).transpose()?;
+        // A human manager's tactics where the game keeps them; or else the one its selections hold.
+        let kept: Vec<(ClubTactic, bool)> = match self.kept_tactics(club, players) {
+            Ok(Some((kept, current))) => {
+                kept.into_iter().enumerate().map(|(i, tactic)| (tactic, i == current)).collect()
+            }
+            Ok(None) | Err(ScoutError::NoTactic { .. } | ScoutError::NotPlaced) => {
+                tactics(club)?.into_iter().take(1).map(|tactic| (tactic, true)).collect()
+            }
+            Err(err) => return Err(err),
+        };
+        let mut ours_kept = Vec::with_capacity(kept.len());
+        for (index, (tactic, in_use)) in kept.iter().enumerate() {
+            let positions = positions(tactic, players);
+            let formation = Formation { key: KEPT[index.min(KEPT.len() - 1)], positions };
+            let Some(lineup) = lineups(&ours.candidates, &[formation], ABILITY_WEIGHT)?.into_iter().next() else {
+                continue;
+            };
+            ours_kept.push(KeptTactic {
+                in_use: *in_use,
+                style: tactic.style.clone(),
+                shape: shape(&positions),
+                picked: in_use.then(|| held(tactic, &ours, players)).transpose()?,
+                best: Matchup { zones: zones(&lineup.slots), lineup },
+            });
+        }
         let matchups = lineups(&ours.candidates, FORMATIONS, ABILITY_WEIGHT)?
             .into_iter()
             .map(|lineup| Matchup { zones: zones(&lineup.slots), lineup })
@@ -355,7 +404,7 @@ impl Session {
             opponent_available: theirs.candidates.len(),
             absent: theirs.left_out,
             facing: [right, left, front, midfield, back],
-            in_use,
+            tactics: ours_kept,
             available: ours.candidates.len(),
             left_out: ours.left_out,
             matchups,

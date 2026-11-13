@@ -15,12 +15,32 @@ use crate::transfer::MoveError;
 const MOST_MANAGERS: u64 = 64;
 /// Deeper than the map of a manager's teams goes.
 const MOST_DEPTH: usize = 64;
+/// More tactics than a manager keeps for a team.
+const MOST_TACTICS: u64 = 8;
+
+/// The tactics a human manager keeps for one of his teams.
+#[derive(Debug, Clone)]
+pub struct TeamTactics {
+    /// Where the game keeps them: the value of the team's node in the manager's map.
+    pub at: u64,
+    /// The addresses of the tactics' blocks as the game lists them; one it has not built is not a pointer.
+    pub blocks: Vec<u64>,
+    /// The index of the one he plays.
+    pub current: usize,
+}
 
 impl Session {
     /// The address of the tactic the human manager plays with the team at `team`, one of a club's teams, as the build
     /// keeps the managers' tactics ([`crate::TacticsLayout`]). `None` when the build or the layout does not place them,
     /// or when no human manager picks the team's tactics.
     pub fn tactic_in_use(&self, team: u64) -> Result<Option<u64>, MoveError> {
+        let block = self.team_tactics(team)?.and_then(|tactics| tactics.blocks.get(tactics.current).copied());
+        Ok(block.filter(|&block| is_user_pointer(block)))
+    }
+
+    /// The tactics the human manager keeps for the team at `team`, and which he plays. `None` as
+    /// [`Session::tactic_in_use`].
+    pub fn team_tactics(&self, team: u64) -> Result<Option<TeamTactics>, MoveError> {
         let (Some(rva), Some(t)) = (self.profile.as_ref().and_then(|p| p.tactics_manager), &self.layout.tactics) else {
             return Ok(None);
         };
@@ -51,11 +71,14 @@ impl Session {
                     let (begin, end) = (process.read_u64(value + t.tactics)?, process.read_u64(value + t.tactics + 8)?);
                     let current = process.read_bytes(value + t.current, 1)?[0] as i8;
                     let count = if is_user_pointer(begin) && end >= begin { (end - begin) / 8 } else { 0 };
-                    if current < 0 || current as u64 >= count.min(8) {
+                    if current < 0 || current as u64 >= count.min(MOST_TACTICS) {
                         return Ok(None);
                     }
-                    let block = process.read_u64(begin + 8 * current as u64)?;
-                    return Ok(is_user_pointer(block).then_some(block));
+                    let mut blocks = Vec::new();
+                    for index in 0..count.min(MOST_TACTICS) {
+                        blocks.push(process.read_u64(begin + 8 * index)?);
+                    }
+                    return Ok(Some(TeamTactics { at: value, blocks, current: current as usize }));
                 }
                 node = walk.children(process, node)?[usize::from(key < id)];
             }

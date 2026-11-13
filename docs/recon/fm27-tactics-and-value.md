@@ -109,14 +109,20 @@ to the style tag (`+0x100`, `VERT` here), but the slot entries sit 8 bytes later
 `+0x160`, the out-of-possession ones from `+0x480`, `0x48` apart. Each of the manager's three selections pointed at
 two blocks of `0x800` bytes, one after the other (`+0x104` read `03 04` in the first and `03 05` in the second). The
 second matched the eleven of the selection: BGK Raya, NCB Konsa, BCB Saliba and Gabriel, CFD Haaland, DM Guimarães,
-PW Saka, AM Ødegaard, W Musiala, DLF Kane. The first held other roles (IWB, IFB, AP, WFD). Which of two blocks the
-game plays was not checked against the tactics screen.
+PW Saka, AM Ødegaard, W Musiala, DLF Kane. The first held other roles (IWB, IFB, AP, WFD). A selection lists one
+block for each tactic its manager keeps, and the byte after the list is the index of the one he plays (see
+`[tactics]` in the layouts): the two blocks were two tactics. The byte was not read on that save.
 
 On the Benevento save of 14 September 2026 (Steam build 26385295, Apple silicon) every selection with a sound list
 pointed at one block: the manager's own (`VERT`, `+0x104` `03 04`) and those of three clubs the game runs, Carrarese,
 Hellas Verona and Sampdoria (style `NULL`, `+0x104` `02 04` or `02 03`, team instructions `0x4000000000000000 0`,
 which read as no instruction set in any area). The Mac layout places the block from that save, and the probe's
 `scout --tactics` and `opponent` read it; the Scouting tab does not.
+
+A human manager's selection is the one inside his team's tactics (`[tactics]`: the list of blocks at `tactics` is the
+selection's own list, so the selection starts `tactics - 0x08` into the team's tactics). Its 26 slots are the one
+eleven and bench he has picked, whatever tactic he plays. On that save the manager kept one tactic for the senior
+team; where the game puts each player when he changes to another of his tactics is not seen yet.
 
 ### The pairing of the two phases
 
@@ -141,7 +147,8 @@ Masks seen on that save and not named yet, with the players who held them. In po
 goalkeepers), `0x400020` (bit 5 / 22, central midfielders of three clubs), `0x408000` (bit 15 / 22, two defensive
 midfielders), `0x840000` (bit 18 / 23, a striker), `0x2000000400000` (bit 49 / 22, an attacking midfielder),
 `0x8000000200000` (bit 51 / 21, one of three centre-backs) and `0x200000000400000` (bit 57 / 22, a central
-midfielder). Out of possession: `0x400001` (bit 0 / 22, two goalkeepers), `0x402000` (bit 13 / 22, a wing-back, between WB and HWB),
+midfielder). Out of possession: `0x400001` (bit 0 / 22, two goalkeepers), `0x402000` (bit 13 / 22, a wing-back,
+between WB and HWB),
 `0x240000` and `0x280000` (bits 18 and 19 / 21, defensive and central midfielders, between PDM and CM), `0x40400000`
 (bit 30 / 22, a central midfielder), `0x80200000` (bit 31 / 21, a central midfielder) and `0x800400000` (bit 35 / 22,
 three wingers and an attacking midfielder).
