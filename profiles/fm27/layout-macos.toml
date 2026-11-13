@@ -350,6 +350,24 @@ slots = 0x28
 count = 26
 player_person = 0x390
 
+# The tactic block the first entry of a selection's list points at, laid out as on Windows (see
+# docs/recon/fm27-tactics-and-value.md) with the slots 8 bytes later. Read on the Benevento save (14 September 2026,
+# Steam build 26385295, Apple silicon), where the game held a selection with one block for the manager's club and for
+# three clubs it runs itself (Carrarese, Hellas Verona, Sampdoria): in each, the roles the editor knows were a
+# goalkeeper's for the goalkeeper, a centre-back's for the centre-backs and a striker's for the strikers. `pairing`
+# is the eleven bytes after a 0x1B at +0x7B3: for each in-possession slot, the out-of-possession slot of the same
+# place. Carrarese's read 0 1 2 3 4 6 7 5 8 9 10, which makes the left wing-back (AWB with the ball) an HWB without it
+# and the defensive midfielder a PDM; read slot for slot, the wing-back would defend as a PDM and a central midfielder
+# as an HWB. On the Arsenal save (4 July 2027) each of the manager's selections listed two blocks, and the second
+# matched its eleven: which of two the game plays is not checked, and the editor reads the first.
+[tactic]
+in_possession = 0x150
+out_of_possession = 0x470
+slot_size = 0x48
+role = 0x10               # in a slot: the u64 role mask
+style = 0x100
+pairing = 0x7B4
+
 # The tactics each human manager keeps for each of his teams, which the game reads to tell how well the players know
 # the tactic in use (game_plugin+0x2039c64 and +0x2ce4aec, Steam build 26340721). The build profile's tactics_manager
 # leads to an object listing one object per human manager; each has a map from a team's id (the team's u32 at +0x08)

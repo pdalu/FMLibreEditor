@@ -109,9 +109,42 @@ to the style tag (`+0x100`, `VERT` here), but the slot entries sit 8 bytes later
 `+0x160`, the out-of-possession ones from `+0x480`, `0x48` apart. Each of the manager's three selections pointed at
 two blocks of `0x800` bytes, one after the other (`+0x104` read `03 04` in the first and `03 05` in the second). The
 second matched the eleven of the selection: BGK Raya, NCB Konsa, BCB Saliba and Gabriel, CFD Haaland, DM Guimarães,
-PW Saka, AM Ødegaard, W Musiala, DLF Kane. The first held other roles (IWB, IFB, AP, WFD). Which block the game plays
-was not checked against the tactics screen, so the Mac layout has no `[tactic]` section yet and the probe's
-`scout --tactics` says it cannot read the tactics there. The Scouting tab does not read them.
+PW Saka, AM Ødegaard, W Musiala, DLF Kane. The first held other roles (IWB, IFB, AP, WFD). Which of two blocks the
+game plays was not checked against the tactics screen.
+
+On the Benevento save of 14 September 2026 (Steam build 26385295, Apple silicon) every selection with a sound list
+pointed at one block: the manager's own (`VERT`, `+0x104` `03 04`) and those of three clubs the game runs, Carrarese,
+Hellas Verona and Sampdoria (style `NULL`, `+0x104` `02 04` or `02 03`, team instructions `0x4000000000000000 0`,
+which read as no instruction set in any area). The Mac layout places the block from that save, and the probe's
+`scout --tactics` reads it; the Scouting tab does not.
+
+### The pairing of the two phases
+
+The out-of-possession slots are not in the order of the in-possession ones. Eleven bytes at `+0x7B4` on the Mac,
+after a `1B` at `+0x7B3` (the table the Windows block has at `+0x798`), give for each in-possession slot the
+out-of-possession slot of the same place:
+
+| Club | Bytes |
+| --- | --- |
+| Benevento | `0 1 2 3 4 5 7 8 6 9 10` |
+| Carrarese | `0 1 2 3 4 6 7 5 8 9 10` |
+| Hellas Verona | `0 1 2 3 4 6 5 9 7 8 10` |
+| Sampdoria | `0 1 2 3 4 6 5 8 7 9 10` |
+
+Read through it, Carrarese's left wing-back (AWB with the ball) is an HWB without it and its defensive midfielder a
+PDM; read slot for slot, the wing-back would defend as a PDM and a central midfielder as an HWB. Benevento's two
+central midfielders both come out as CM and its two wingers with one mask. The other way round (the byte as the
+in-possession slot of an out-of-possession one) gives Benevento a winger defending as a CM. Not checked against the
+tactics screen.
+
+Masks seen on that save and not named yet, with the players who held them. In possession: `0x200001` (bit 0 / 21, two
+goalkeepers), `0x400020` (bit 5 / 22, central midfielders of three clubs), `0x408000` (bit 15 / 22, two defensive
+midfielders), `0x840000` (bit 18 / 23, a striker), `0x2000000400000` (bit 49 / 22, an attacking midfielder),
+`0x8000000200000` (bit 51 / 21, one of three centre-backs) and `0x200000000400000` (bit 57 / 22, a central
+midfielder). Out of possession: `0x400001` (bit 0 / 22, two goalkeepers), `0x402000` (bit 13 / 22, a wing-back, between WB and HWB),
+`0x240000` and `0x280000` (bits 18 and 19 / 21, defensive and central midfielders, between PDM and CM), `0x40400000`
+(bit 30 / 22, a central midfielder), `0x80200000` (bit 31 / 21, a central midfielder) and `0x800400000` (bit 35 / 22,
+three wingers and an attacking midfielder).
 
 ### Not found yet
 

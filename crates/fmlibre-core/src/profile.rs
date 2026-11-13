@@ -230,6 +230,10 @@ pub struct TacticLayout {
     pub role: u64,
     /// `u32` code of the style the tactic was made from, as text backwards (`CONT`, `TIKI`, `DIRE`).
     pub style: u64,
+    /// Eleven bytes, one for each in-possession slot: the out-of-possession slot that is the same place of the
+    /// formation. Only in the layouts it has been checked in; without it the two run in the same order.
+    #[serde(default)]
+    pub pairing: Option<u64>,
 }
 
 /// The tactics each human manager keeps for each of his teams, as the game reads them to tell how well the players

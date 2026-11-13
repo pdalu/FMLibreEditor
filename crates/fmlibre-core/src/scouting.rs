@@ -730,13 +730,25 @@ impl Session {
     /// The tactics the manager of `club` has picked a team for, the one most of the game's copies hold first. Finds
     /// the selections by their class, in one pass over the game's memory (a few seconds).
     pub fn club_tactics(&self, club: &ClubSummary, players: &PlayerIndex) -> Result<Vec<ClubTactic>, ScoutError> {
-        let (Some(selection), Some(tactic)) = (&self.layout.selection, &self.layout.tactic) else {
-            return Err(ScoutError::NotPlaced);
-        };
         let vtables = self.selection_vtables();
         if vtables.is_empty() {
             return Err(ScoutError::NotPlaced);
         }
+        let selections: Vec<u64> =
+            rtti::objects(&self.process, &self.plugin, vtables)?.into_values().flatten().collect();
+        self.club_tactics_among(&selections, club, players)
+    }
+
+    /// As [`Session::club_tactics`], among the selections already found at `selections`.
+    pub(crate) fn club_tactics_among(
+        &self,
+        selections: &[u64],
+        club: &ClubSummary,
+        players: &PlayerIndex,
+    ) -> Result<Vec<ClubTactic>, ScoutError> {
+        let (Some(selection), Some(tactic)) = (&self.layout.selection, &self.layout.tactic) else {
+            return Err(ScoutError::NotPlaced);
+        };
         let p = &self.layout.player;
         // The club's players by the id the game gives people.
         let mut people: HashMap<u32, &PlayerSummary> = HashMap::new();
@@ -750,7 +762,7 @@ impl Session {
         }
 
         let mut tactics: Vec<(Vec<u8>, Vec<u32>, ClubTactic)> = Vec::new();
-        for object in rtti::objects(&self.process, &self.plugin, vtables)?.into_values().flatten() {
+        for &object in selections {
             let Some(list) = PointerList::read(&self.process, object + selection.list)? else {
                 continue;
             };
@@ -776,6 +788,12 @@ impl Session {
             };
             let ip: Vec<u64> = (0..11).map(|k| mask(tactic.in_possession, k)).collect();
             let oop: Vec<u64> = (0..11).map(|k| mask(tactic.out_of_possession, k)).collect();
+            // The out-of-possession slots in the order of the in-possession ones, where the layout pairs them.
+            let paired = tactic.pairing.and_then(|at| self.process.read_bytes(block + at, 11).ok());
+            let oop: Vec<u64> = match paired.as_deref().and_then(pairing) {
+                Some(order) => order.iter().map(|&slot| oop[slot]).collect(),
+                None => oop,
+            };
             // A block the game has given up holds something else.
             if ip.iter().chain(&oop).filter(|&&mask| looks_like_role(mask)).count() < 18 {
                 continue;
@@ -818,6 +836,13 @@ impl Session {
         out.sort_by_key(|tactic| std::cmp::Reverse(tactic.copies));
         Ok(out)
     }
+}
+
+/// The out-of-possession slot of each in-possession one, from the block's eleven bytes; none unless they name every
+/// slot once.
+fn pairing(bytes: &[u8]) -> Option<[usize; 11]> {
+    let order: [usize; 11] = bytes.iter().map(|&slot| usize::from(slot)).collect::<Vec<_>>().try_into().ok()?;
+    (0..11).all(|slot| order.contains(&slot)).then_some(order)
 }
 
 /// The side a player of a sided line plays best, from his ratings; none for a central line or a tie.
@@ -1571,6 +1596,15 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_pairing_names_every_slot_once() {
+        // Carrarese's, as read: the sixth in-possession slot is the seventh out of possession.
+        assert_eq!(pairing(&[0, 1, 2, 3, 4, 6, 7, 5, 8, 9, 10]), Some([0, 1, 2, 3, 4, 6, 7, 5, 8, 9, 10]));
+        assert_eq!(pairing(&[0, 1, 2, 3, 4, 6, 7, 6, 8, 9, 10]), None);
+        assert_eq!(pairing(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11]), None);
+        assert_eq!(pairing(&[0, 1, 2]), None);
     }
 
     #[test]
