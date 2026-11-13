@@ -109,7 +109,9 @@ pub struct NextMatch {
     /// The opponent's eleven, and how many other elevens the game holds for it.
     pub eleven: Eleven,
     pub other_elevens: usize,
-    /// The opponent's injured and banned players.
+    /// How many players of the opponent's squad can play, and its injured and banned ones. A club of a league the
+    /// save does not run has few players in it, or none.
+    pub opponent_available: usize,
     pub absent: Vec<LeftOut>,
     /// The opponent's zones in the order the club's meet them: its right, its left, its front, its midfield and its
     /// back.
@@ -324,6 +326,7 @@ impl Session {
             home,
             eleven,
             other_elevens: their_tactics.len().saturating_sub(1),
+            opponent_available: theirs.candidates.len(),
             absent: theirs.left_out,
             facing: [right, left, front, midfield, back],
             in_use,

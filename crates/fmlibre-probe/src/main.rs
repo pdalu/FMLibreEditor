@@ -6594,6 +6594,14 @@ fn opponent(session: &Session, club: Option<u32>, later: usize) -> Result<()> {
         theirs.score
     );
     print_eleven(theirs);
+    let nobody = theirs.slots.iter().filter(|slot| slot.place.fitting.is_none()).count();
+    if nobody > 0 {
+        println!(
+            "  !! nobody for {nobody} places: the save holds {} players of its squad who can play (a club of a league \
+             it does not run has few, or none)",
+            report.opponent_available
+        );
+    }
     if report.other_elevens > 0 {
         println!("  the game holds {} other eleven(s) for it", report.other_elevens);
     }
