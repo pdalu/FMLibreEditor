@@ -28,7 +28,7 @@ use crate::lineup::{
 };
 use crate::players::{PlayerIndex, PlayerSummary};
 use crate::rtti;
-use crate::scouting::{ClubTactic, ScoutError};
+use crate::scouting::{ClubTactic, Line, Phase, ScoutError, role};
 use crate::session::Session;
 
 /// A match still to play.
@@ -78,8 +78,8 @@ pub struct Eleven {
     pub copies: usize,
     /// The style the tactic was made from, as the game codes it; none for a club the game runs.
     pub style: Option<String>,
-    /// The formation: one of [`FORMATIONS`] when the positions are its own, or else the players in each line from
-    /// the back, e.g. `4-1-3-2`.
+    /// The formation: one of [`FORMATIONS`] when the positions are its own, or else the players in each of the five
+    /// lines from the back (defence, defensive midfield, midfield, attacking midfield, attack), e.g. `4-1-3-0-2`.
     pub shape: String,
     pub slots: Vec<ElevenSlot>,
     /// The mean of its places' scores, 0–100.
@@ -168,20 +168,31 @@ const PLAYS_IT: u8 = 15;
 
 /// The position each place of a tactic most likely is. With a role known: its line's own position on the side its
 /// player plays best, when he plays that well, or else the position of the line he plays best. With none: the
-/// position he plays best of all. Two places on one side of a line with nobody on the other are a right and a left:
-/// the player who plays the other side better takes it.
+/// position he plays best of all.
+///
+/// Three things the roles leave open are settled as formations usually are. A wing-back's role with the ball behind
+/// fewer than three centre-backs is a full-back's place, unless the role without the ball is a wing-back's too. Two
+/// places on one side of a line with nobody on the other are a right and a left: the player who plays the other
+/// side better takes it. And a wide midfielder or winger with nobody on the other side is matched by the central
+/// place without a role whose player plays that side.
 fn positions(tactic: &ClubTactic, players: &PlayerIndex) -> [&'static str; 11] {
     let player = |slot: usize| tactic.slots.get(slot).and_then(|place| place.player).and_then(|uid| players.get(uid));
+    let centre_backs = tactic.slots.iter().filter(|place| place.line == Some(Line::CentreBack)).count();
     let mut out = ["mc"; 11];
     for (slot, place) in tactic.slots.iter().enumerate().take(11) {
-        let among: Vec<&'static str> = match place.line {
+        let without = place.out_of_possession.and_then(|key| role(Phase::OutOfPossession, key)).map(|role| role.line);
+        let line = match place.line {
+            Some(Line::WingBack) if centre_backs < 3 && without != Some(Line::WingBack) => Some(Line::FullBack),
+            line => line,
+        };
+        let among: Vec<&'static str> = match line {
             Some(line) => line.positions(place.side).iter().map(|&index| POSITIONS[index]).collect(),
             // The first place is the goalkeeper's.
             None if slot == 0 => ORDER.to_vec(),
             None => ORDER[1..].to_vec(),
         };
         out[slot] = match player(slot) {
-            Some(player) if place.line.is_some() && rating(player, among[0]) >= PLAYS_IT => among[0],
+            Some(player) if line.is_some() && rating(player, among[0]) >= PLAYS_IT => among[0],
             Some(player) => {
                 let mut best = among[0];
                 for position in among {
@@ -207,11 +218,26 @@ fn positions(tactic: &ClubTactic, players: &PlayerIndex) -> [&'static str; 11] {
             }
         }
     }
+    for (right, left) in [("mr", "ml"), ("amr", "aml")] {
+        for (taken, free) in [(right, left), (left, right)] {
+            if !out.contains(&taken) || out.contains(&free) {
+                continue;
+            }
+            let plays = |slot: usize| player(slot).map_or(0, |player| rating(player, free));
+            let central = |&slot: &usize| {
+                tactic.slots.get(slot).is_some_and(|place| place.line.is_none()) && matches!(out[slot], "mc" | "amc")
+            };
+            let best = (1..11).filter(central).filter(|&slot| plays(slot) >= PLAYS_IT).max_by_key(|&slot| plays(slot));
+            if let Some(slot) = best {
+                out[slot] = free;
+            }
+        }
+    }
     out
 }
 
 /// The name of the formation with these positions: one of [`FORMATIONS`] when it has the same, or else the players
-/// in each line from the back.
+/// in each of the five [`LINES`] from the back, none left out, so that it is not taken for one of them.
 fn shape(positions: &[&'static str]) -> String {
     let sorted = |positions: &[&'static str]| {
         let mut sorted = positions.to_vec();
@@ -223,7 +249,7 @@ fn shape(positions: &[&'static str]) -> String {
         return formation.key.to_owned();
     }
     let lines = LINES.map(|line| positions.iter().filter(|position| line.contains(position)).count());
-    lines.iter().filter(|&&count| count > 0).map(usize::to_string).collect::<Vec<_>>().join("-")
+    lines.iter().map(usize::to_string).collect::<Vec<_>>().join("-")
 }
 
 /// The eleven of `tactic` as the game holds it, each player scored in his place as the squad's state makes him.
@@ -395,7 +421,7 @@ mod tests {
     use super::*;
     use crate::details::ATTRIBUTE_GROUPS;
     use crate::filter::attribute_keys;
-    use crate::scouting::{Line, TacticSlot};
+    use crate::scouting::TacticSlot;
 
     /// A player rated as `ratings` say and 1 elsewhere.
     fn player(uid: u32, ratings: &[(&str, u8)]) -> PlayerSummary {
@@ -498,6 +524,51 @@ mod tests {
     }
 
     #[test]
+    fn a_wing_backs_role_behind_two_centre_backs_is_a_full_backs_place() {
+        let (mut tactic, players) = three_at_the_back();
+        // The third centre-back's place becomes a midfielder's: a back four whose wide men play as wing-backs.
+        tactic.slots[3].line = Some(Line::CentralMidfield);
+        tactic.slots[3].position = Some("mc");
+        let squad: Vec<PlayerSummary> = players
+            .iter()
+            .map(|p| match p.uid {
+                4 => player(4, &[("mc", 20)]),
+                5 => player(5, &[("dr", 20), ("wbr", 18)]),
+                7 => player(7, &[("dl", 20), ("wbl", 18)]),
+                _ => p.clone(),
+            })
+            .collect();
+        let players = PlayerIndex::new(squad);
+        tactic.slots[4].side = Some(crate::scouting::Side::Right);
+        tactic.slots[6].side = Some(crate::scouting::Side::Left);
+        let found = positions(&tactic, &players);
+        assert_eq!((found[4], found[6]), ("dr", "dl"));
+        // Unless they are wing-backs without the ball too.
+        tactic.slots[4].out_of_possession = Some("wb");
+        tactic.slots[6].out_of_possession = Some("hwb");
+        let found = positions(&tactic, &players);
+        assert_eq!((found[4], found[6]), ("wbr", "wbl"));
+    }
+
+    #[test]
+    fn a_lone_winger_is_matched_on_the_other_side() {
+        let (mut tactic, players) = three_at_the_back();
+        // A winger on the right, and a place without a role whose player plays on the left as well as in the middle.
+        tactic.slots[9].line = Some(Line::Wide);
+        tactic.slots[9].side = Some(crate::scouting::Side::Right);
+        let squad: Vec<PlayerSummary> = players
+            .iter()
+            .map(|p| match p.uid {
+                10 => player(10, &[("amr", 20)]),
+                9 => player(9, &[("amc", 20), ("aml", 17)]),
+                _ => p.clone(),
+            })
+            .collect();
+        let found = positions(&tactic, &PlayerIndex::new(squad));
+        assert_eq!((found[9], found[8], found[7]), ("amr", "aml", "mc"));
+    }
+
+    #[test]
     fn two_on_one_side_are_a_right_and_a_left() {
         let (mut tactic, players) = three_at_the_back();
         // Wing-backs whose sides the ratings do not tell: both come out on the right at first.
@@ -520,7 +591,9 @@ mod tests {
     #[test]
     fn a_shape_the_editor_has_no_name_for_counts_its_lines() {
         let positions = ["gk", "dr", "dc", "dc", "dl", "dm", "mr", "mc", "ml", "st", "st"];
-        assert_eq!(shape(&positions), "4-1-3-2");
+        assert_eq!(shape(&positions), "4-1-3-0-2");
+        // Two holding midfielders are not the editor's 4-2-2-2, which has none.
+        assert_eq!(shape(&["gk", "dr", "dc", "dc", "dl", "dm", "dm", "mc", "mc", "st", "st"]), "4-2-2-0-2");
         assert_eq!(shape(&["gk", "dl", "dc", "dc", "dr", "mc", "mc", "ml", "mr", "st", "st"]), "4-4-2");
     }
 
