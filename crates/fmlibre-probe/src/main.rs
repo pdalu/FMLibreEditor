@@ -479,6 +479,22 @@ enum Command {
         #[arg(long)]
         restore: bool,
     },
+    /// Write test for #243: with --list, the club teams (other than senior) that have staff and no manager, and their
+    /// coaches; with ID and TEAM, make that coach the manager of his club's team at index TEAM in the running game,
+    /// keeping the undo in --undo-file; with --undo, write back what that file says, if memory still holds it.
+    YouthManager {
+        id: Option<u32>,
+        team: Option<usize>,
+        #[arg(long)]
+        list: bool,
+        #[arg(long)]
+        undo: bool,
+        /// Work the change out and print its writes, writing nothing.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, default_value = "youth-manager-undo.json")]
+        undo_file: PathBuf,
+    },
     /// Sign a member of staff who has no club for a club in the running game, as JOB, under a contract the editor makes
     /// in a slot of the game's own pool of contracts, modelled on one of the club's staff's.
     StaffSign {
@@ -1269,6 +1285,7 @@ fn run(cli: Cli) -> Result<()> {
                 | Command::StaffMove { .. }
                 | Command::StaffMoveAll { .. }
                 | Command::StaffJob { .. }
+                | Command::YouthManager { list: false, dry_run: false, .. }
                 | Command::StaffSign { .. }
                 | Command::Swap { .. }
                 | Command::Heal { heal: true, .. }
@@ -1433,6 +1450,9 @@ fn run(cli: Cli) -> Result<()> {
                 StaffAction::Sign(club, job, terms),
                 restore,
             )
+        }
+        Command::YouthManager { id, team, list, undo, dry_run, undo_file } => {
+            youth_manager(&connect(process, ArraySource::ProfileFirst)?, id, team, list, undo, dry_run, &undo_file)
         }
         Command::StaffJob { id, job, restore } => {
             staff_change(&connect(process, ArraySource::ProfileFirst)?, id, StaffAction::Job(job), restore)
@@ -8606,4 +8626,113 @@ mod cohesion_tests {
         assert_eq!(most_named(&BTreeMap::from([(7, 2), (5, 2)])), Some((5, 2)));
         assert_eq!(most_named(&BTreeMap::new()), None);
     }
+}
+
+fn youth_manager(
+    session: &Session,
+    id: Option<u32>,
+    team: Option<usize>,
+    list: bool,
+    undo: bool,
+    dry_run: bool,
+    undo_file: &Path,
+) -> Result<()> {
+    let (process, layout) = (&session.process, &session.layout);
+    let staff = session.staff()?;
+    let manager = layout.team.manager.context("the layout places no team manager")?;
+    let read_list = |at: u64| -> Vec<u64> {
+        let (Ok(b), Ok(e)) = (process.read_u64(at), process.read_u64(at + 8)) else { return Vec::new() };
+        if !is_user_pointer(b) || e < b || e - b > 0x10000 {
+            return Vec::new();
+        }
+        (b..e).step_by(8).filter_map(|a| process.read_u64(a).ok()).collect()
+    };
+    // Who works for which team, by his contract's team.
+    let mut by_team: std::collections::HashMap<u64, Vec<&fmlibre_core::StaffSummary>> =
+        std::collections::HashMap::new();
+    for m in staff.iter().filter(|m| m.shift == 0 && m.job.is_some()) {
+        let Ok(c) = process.read_u64(m.address + layout.staff.contract) else { continue };
+        if let Ok(t) = process
+            .read_u64(c + layout.contract.team)
+            .map_err(|_| ())
+            .and_then(|t| if is_user_pointer(c) { Ok(t) } else { Err(()) })
+        {
+            by_team.entry(t).or_default().push(m);
+        }
+    }
+    let describe = |club: &fmlibre_core::ClubSummary, index: usize, t: u64| {
+        let kind = process.read_bytes(t + layout.team.kind, 1).map(|b| b[0]).unwrap_or(255);
+        let held = process.read_u64(t + manager).unwrap_or(0);
+        let who = if held == 0 {
+            "no one".to_owned()
+        } else {
+            staff.iter().find(|s| s.address == held).map_or(format!("{held:#x}"), |s| format!("{} ({})", s.name, s.uid))
+        };
+        println!(
+            "  {} (UID {}) team {index}, kind {kind}: manager place {:#x} holds {who}",
+            club.name,
+            club.uid,
+            t + manager
+        );
+        let coaching = read_list(club.address + layout.club.coaching_staff);
+        for m in by_team.get(&t).map(Vec::as_slice).unwrap_or(&[]) {
+            let job = m.job.unwrap_or(0);
+            println!(
+                "      {:>10}  {:<28} {:<22} {}",
+                m.uid,
+                m.name,
+                job_name(job).map_or(format!("job {job}"), str::to_owned),
+                if coaching.contains(&m.address) { "coaching list" } else { "" }
+            );
+        }
+    };
+    let clubs = session.clubs()?;
+    if list {
+        for club in &clubs {
+            for (index, t) in read_list(club.address + layout.club.teams).into_iter().enumerate().skip(1) {
+                if is_user_pointer(t) && process.read_u64(t + manager).unwrap_or(1) == 0 && by_team.contains_key(&t) {
+                    describe(club, index, t);
+                }
+            }
+        }
+        return Ok(());
+    }
+    if undo {
+        let writes: Vec<(u64, Vec<u8>, Vec<u8>)> = serde_json::from_slice(&std::fs::read(undo_file)?)?;
+        session.undo_staff_writes(&writes)?;
+        println!("undone: {} writes put back from {}", writes.len(), undo_file.display());
+        std::fs::rename(undo_file, undo_file.with_extension("undone.json"))?;
+        return Ok(());
+    }
+    let (Some(id), Some(index)) = (id, team) else { bail!("give ID and TEAM, or --list, or --undo") };
+    ensure!(!undo_file.exists(), "{} exists: undo that change first", undo_file.display());
+    let member = staff.iter().find(|s| s.uid == id).with_context(|| format!("no member of staff with id {id}"))?;
+    let club = clubs.iter().find(|c| Some(c.uid) == member.club_uid).context("he has no club")?;
+    let teams = read_list(club.address + layout.club.teams);
+    let t = *teams.get(index).context("no such team")?;
+    println!("before:");
+    describe(club, index, t);
+    let plan = session.plan_youth_manager(member, index)?;
+    if dry_run {
+        for (address, before, after) in Session::staff_plan_writes(&plan) {
+            println!("  would write {address:#x}: {} -> {}", hex(&before), hex(&after));
+        }
+        return Ok(());
+    }
+    let done = session.apply_staff_plan(&plan)?;
+    let writes = Session::staff_change_writes(&done);
+    std::fs::write(undo_file, serde_json::to_vec_pretty(&writes)?)?;
+    for (address, before, after) in &writes {
+        println!("  wrote {address:#x}: {} -> {}", hex(before), hex(after));
+    }
+    println!("undo kept in {}", undo_file.display());
+    let staff = session.staff()?;
+    let now = staff.iter().find(|s| s.uid == id).context("he is gone")?;
+    println!(
+        "after: {} at {} as {}",
+        now.name,
+        now.club.as_deref().unwrap_or("-"),
+        now.job.and_then(job_name).unwrap_or("?")
+    );
+    Ok(())
 }

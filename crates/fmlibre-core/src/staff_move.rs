@@ -350,6 +350,79 @@ impl Session {
         })
     }
 
+    /// Write test for #243, not for the app: works out making `member`, a coach of his club (in its coaching list, in
+    /// no team's place for a manager), the manager of the club's team at `team_index` (1 and up: a youth or reserve
+    /// team) whose place for one is empty: the team's place holds him, and his contract is with that team as a
+    /// manager's. Nothing is written.
+    pub fn plan_youth_manager(&self, member: &StaffSummary, team_index: usize) -> Result<StaffPlan, MoveError> {
+        let holder = self.staff_holder(member)?;
+        self.post(holder.job)?;
+        if holder.manager.is_some() || holder.director || holder.job == MANAGER {
+            return Err(MoveError::StaffRole);
+        }
+        if !holder.lists.iter().any(|(department, ..)| *department == Department::Coaching) {
+            return Err(MoveError::NotInDepartment);
+        }
+        let offset = self.layout.team.manager.ok_or(MoveError::UnusualJob { job: MANAGER })?;
+        let not_a_club = MoveError::NotAClub { uid: holder.club_uid };
+        let teams = crate::transfer::PointerList::read(&self.process, holder.club + self.layout.club.teams)?
+            .ok_or(not_a_club)?;
+        let elements = teams.elements(&self.process)?;
+        let team = match elements.get(team_index) {
+            Some(&team) if team_index > 0 && is_user_pointer(team) => team,
+            _ => return Err(MoveError::NotAClub { uid: holder.club_uid }),
+        };
+        if self.process.read_u64(team + self.layout.team.club)? != holder.club {
+            return Err(MoveError::UnusualContract);
+        }
+        match self.process.read_u64(team + offset)? {
+            0 => {}
+            held => return Err(MoveError::ManagerTaken { uid: self.staff_uid(held) }),
+        }
+        let c = &self.layout.contract;
+        let mut patches = Patches::default();
+        patches.push(team + offset, 0u64.to_le_bytes(), holder.object.to_le_bytes());
+        patches.push(
+            holder.contract + c.team,
+            &holder.record[c.team as usize..c.team as usize + 8],
+            team.to_le_bytes(),
+        );
+        patches.push(holder.contract + c.job, [holder.job], [MANAGER]);
+        Ok(StaffPlan {
+            member: member.uid,
+            from_club: holder.club_uid,
+            to_club: holder.club_uid,
+            job: (holder.job, MANAGER),
+            grows: false,
+            contract: None,
+            patches: patches.0,
+            grow: Vec::new(),
+        })
+    }
+
+    /// Write test for #243: the writes of a change as (address, bytes before, bytes after), to keep its undo in a file.
+    pub fn staff_change_writes(done: &StaffChange) -> Vec<(u64, Vec<u8>, Vec<u8>)> {
+        done.patches.iter().map(|p| (p.address, p.before.clone(), p.after.clone())).collect()
+    }
+
+    /// Write test for #243: the writes a plan would make, as `staff_change_writes` gives them.
+    pub fn staff_plan_writes(plan: &StaffPlan) -> Vec<(u64, Vec<u8>, Vec<u8>)> {
+        plan.patches.iter().map(|p| (p.address, p.before.clone(), p.after.clone())).collect()
+    }
+
+    /// Write test for #243: undoes the writes `staff_change_writes` gave, provided memory still holds what they wrote.
+    pub fn undo_staff_writes(&self, writes: &[(u64, Vec<u8>, Vec<u8>)]) -> Result<(), MoveError> {
+        let patches: Vec<crate::transfer::Patch> = writes
+            .iter()
+            .map(|(address, before, after)| crate::transfer::Patch {
+                address: *address,
+                before: before.clone(),
+                after: after.clone(),
+            })
+            .collect();
+        self.undo_patches(&patches)
+    }
+
     /// Works out signing `member`, who has no club, to `club` as `job` under a contract the editor makes on `terms`:
     /// a slot of the game's own pool of contracts (see `object_pool.rs`) holding a copy of the full contract of the
     /// member of the club's staff the job is most like his (the same job, else one in the same department, else any),
