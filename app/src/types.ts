@@ -1119,7 +1119,7 @@ export interface ScoutingOverview {
 /** What a recommendation is for: better than the best at the position now, depth, a prospect, or anyone. */
 export type Purpose = "firstTeam" | "rotation" | "future" | "any";
 
-export type ScoutOrder = "score" | "fit" | "probability" | "fee";
+export type ScoutOrder = "score" | "fit" | "probability" | "fee" | "elevenGain";
 
 /** What `scouting_suggest` looks for; omitted fields are open. */
 export interface ScoutRequest {
@@ -1138,6 +1138,10 @@ export interface ScoutRequest {
   noFreeAgents?: boolean;
   order?: ScoutOrder;
   limit?: number;
+  /** A tactic's slots: each suggestion then says how much he would raise the best eleven of the squad in it. */
+  tactic?: SlotRoles[] | null;
+  /** The share of a slot's value its role in possession has, 0 to 1; 0.6 when omitted. */
+  inPossessionWeight?: number | null;
 }
 
 /**
@@ -1180,6 +1184,8 @@ export interface Suggestion extends Fitting {
   /** The club his contract is with, when it is not the one he plays for (he is on loan, or in its second team). */
   ownerClub: string | null;
   ownerClubUid: number | null;
+  /** How much he would raise the average fit (0–100) of the best eleven of the tactic asked about; null without one. */
+  elevenGain: number | null;
 }
 
 /** What `scouting_suggest` returns. */
@@ -1194,4 +1200,104 @@ export interface Scouted {
   examined: number;
   candidates: number;
   eligible: number;
+}
+
+/** How a player suits one role of the tactics screen. */
+export interface RoleFit {
+  key: string;
+  phase: Phase;
+  line: Line;
+  /** 0–100. */
+  fit: number;
+  /** His attributes for the role, 1–20. */
+  rating: number;
+  /** The position he would play it in, and his rating there (1–20). */
+  position: string;
+  positionRating: number;
+}
+
+/** An attribute worth training for a role. */
+export interface TrainingFocus {
+  attribute: string;
+  /** His value now, 1–20. */
+  value: number;
+  /** What one more point adds to his fit for the role. */
+  gain: number;
+  /** The role leans on it most. */
+  key: boolean;
+}
+
+/** What `player_roles` returns. */
+export interface PlayerRoles {
+  /** Every role, the best first. */
+  fits: RoleFit[];
+  trainingRole: { key: string; phase: Phase } | null;
+  training: TrainingFocus[];
+}
+
+/** What a slot of a tactic asks for: its roles by key, and its side for a wide line. */
+export interface SlotRoles {
+  inPossession: string | null;
+  outOfPossession: string | null;
+  side: "right" | "left" | null;
+}
+
+/** One of the manager's tactics, as `scouting_tactics` reads it. */
+export interface OwnTactic {
+  /** The style it was made from, as the game codes it ("CONT", "TIKI"...). */
+  style: string | null;
+  copies: number;
+  slots: SlotRoles[];
+  /** Slots with a role the editor does not recognise yet. */
+  unknownRoles: number;
+}
+
+/** A player in a slot of a line-up. */
+export interface Placed {
+  player: PlayerSummary;
+  /** 0–100: for the slot's two roles together, and for each. */
+  fit: number;
+  inPossession: number | null;
+  outOfPossession: number | null;
+  position: string | null;
+}
+
+export interface LineupSlot extends SlotRoles {
+  index: number;
+  line: Line | null;
+  position: string | null;
+  first: Placed | null;
+  second: Placed | null;
+  /** The players left out of the first eleven who fit it best. */
+  cover: Placed[];
+}
+
+/** What `scouting_lineup` returns. */
+export interface Lineup {
+  slots: LineupSlot[];
+  firstAverage: number;
+  secondAverage: number;
+  squadSize: number;
+}
+
+export type Unit = "goalkeeper" | "defence" | "midfield" | "attack";
+
+/** How well the squad fills one tactic: one of the manager's (`own`) or one of the editor's formations (`name`). */
+export interface TacticRank {
+  name: string | null;
+  own: number | null;
+  style: string | null;
+  slots: SlotRoles[];
+  /** Slots whose first-eleven player fits them from 60, of how many. */
+  covered: number;
+  size: number;
+  firstAverage: number;
+  secondAverage: number;
+  units: [Unit, number][];
+}
+
+/** Which players a line-up is picked from. */
+export interface SquadChoice {
+  /** Leave out the injured and the banned. */
+  availableOnly: boolean;
 }

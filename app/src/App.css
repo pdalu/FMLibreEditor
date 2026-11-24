@@ -5688,3 +5688,131 @@ button.danger:hover:not(:disabled) {
   flex: 1;
   min-width: 0;
 }
+
+/* Best eleven and Tactics: the pickers in a row, then one table. */
+.scout-lineup-controls {
+  justify-content: flex-start;
+  align-items: flex-end;
+}
+
+.scout-lineup-controls .scout-field {
+  min-width: 180px;
+  margin-bottom: 0;
+}
+
+.scout-lineup-controls .scout-how {
+  margin-left: auto;
+}
+
+.scout-lineup-summary {
+  margin: 4px 0 8px;
+}
+
+.scout-slot {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* A player of the eleven and his fit beside him. */
+.scout-placed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.scout-cover {
+  white-space: normal;
+  font-size: 13px;
+}
+
+.scout-units {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 4px;
+}
+
+.scout-tactics-table tr[aria-current] td {
+  background: var(--accent-faint);
+}
+
+.scout-gain.pos {
+  color: var(--tier-4);
+  font-weight: 800;
+}
+
+/* The Roles group of the profile: the best roles of each phase side by side, then the training advice. */
+.player-roles-phases {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 6px 24px;
+}
+
+.player-roles-phase ul,
+.player-roles-training ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.player-roles-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 110px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+.player-roles-row[aria-current] {
+  background: var(--accent-faint);
+}
+
+.player-roles-row .name-link {
+  overflow: hidden;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: underline transparent;
+  text-underline-offset: 3px;
+}
+
+.player-roles-row .name-link:is(:hover, :focus-visible) {
+  background: none;
+  color: var(--accent-text);
+  text-decoration-color: currentColor;
+}
+
+.player-roles-abbr {
+  font-weight: 800;
+}
+
+.player-roles-more {
+  margin: 6px 0 10px;
+}
+
+.player-roles-training ol {
+  counter-reset: focus;
+  font-size: 13px;
+}
+
+.player-roles-training li {
+  counter-increment: focus;
+  padding: 2px 0;
+}
+
+.player-roles-training li::before {
+  content: counter(focus) ". ";
+  color: var(--muted);
+}
+
+.player-roles-key {
+  font-weight: 700;
+}

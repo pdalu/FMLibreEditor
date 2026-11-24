@@ -9,12 +9,12 @@ use fmlibre_core::{
     ArraySource, Buyer, CaptainRole, CaptainSet, Change, Clause, ClauseSet, ClubDetails, ClubFilter, ClubIndex,
     ClubMove, ClubSummary, Coded, EditError, Entity, EntityArrays, ExportFormat, ExportHeader, FeePlan, Field, FmDate,
     GAME_EXE, GAME_PLUGIN, GameInfo, GraphicsCounts, GraphicsIndex, HOMEGROWN_RULES, Healed, Health, Kind,
-    LOAN_EXPIRES, LOAN_OPTION_FEE, Lifted, Listed, Loan, MoveError, MovePlan, MoveTerms, Nation, NewContract,
-    NewStaffContract, Operation, Paid, Picture, Planned, PlayerDetails, PlayerFilter, PlayerIndex, PlayerOrder,
-    PlayerSummary, ROLES, RelationSet, RetirementSet, Role, SCOUT_POSITIONS, ScoutError, ScoutPosition, ScoutRequest,
-    Scouted, SearchIndex, Session, SessionError, Skipped, SquadReport, StadiumName, StadiumRename, StaffChange,
-    StaffDetails, StaffFilter, StaffIndex, StaffOrder, StaffPlan, Target, Tie, TieTarget, find_game, nations,
-    sort_players, sort_staff,
+    LOAN_EXPIRES, LOAN_OPTION_FEE, Lifted, Lineup, Listed, Loan, MoveError, MovePlan, MoveTerms, Nation, NewContract,
+    NewStaffContract, Operation, Paid, Phase, Picture, Planned, PlayerDetails, PlayerFilter, PlayerIndex, PlayerOrder,
+    PlayerSummary, ROLES, RelationSet, RetirementSet, Role, RoleFit, SCOUT_POSITIONS, ScoutError, ScoutPosition,
+    ScoutRequest, Scouted, SearchIndex, Session, SessionError, Skipped, SlotRoles, SquadChoice, SquadReport,
+    StadiumName, StadiumRename, StaffChange, StaffDetails, StaffFilter, StaffIndex, StaffOrder, StaffPlan, TacticRank,
+    Target, Tie, TieTarget, TrainingFocus, find_game, nations, sort_players, sort_staff,
 };
 use fmlibre_mem::{Process, find_processes, is_current_process_elevated, list_modules};
 use serde::{Deserialize, Serialize};
@@ -3271,6 +3271,125 @@ fn scouting_suggest(state: State<'_, AppState>, request: ScoutRequest) -> Result
     Ok(connection.session.scout(&request, &buyer, &connection.players, &connection.clubs, &connection.human_clubs)?)
 }
 
+/// How a player suits every role, and what he would best train for one: the role asked for, or the one in possession
+/// that suits him best.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerRoles {
+    fits: Vec<RoleFit>,
+    /// The role the training advice is for, and the advice.
+    training_role: Option<RoleKey>,
+    training: Vec<TrainingFocus>,
+}
+
+/// A role by its key and phase.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RoleKey {
+    key: String,
+    phase: Phase,
+}
+
+/// The roles of the player `uid` and what he would best train for `role`. Works on the player list; reads nothing.
+#[tauri::command]
+fn player_roles(state: State<'_, AppState>, uid: u32, role: Option<RoleKey>) -> Result<PlayerRoles, Failure> {
+    let guard = state.0.lock()?;
+    let connection = guard.as_ref().ok_or_else(not_connected)?;
+    let player = connection.players.get(uid).ok_or_else(|| not_found(Entity::Player, uid))?;
+    let fits = fmlibre_core::role_fits(player);
+    let chosen = match &role {
+        Some(asked) => fmlibre_core::role(asked.phase, &asked.key),
+        None => fmlibre_core::best_role(player, Phase::InPossession)
+            .and_then(|best| fmlibre_core::role(best.phase, best.key)),
+    };
+    Ok(PlayerRoles {
+        fits,
+        training_role: chosen.map(|role| RoleKey { key: role.key.to_owned(), phase: role.phase }),
+        training: chosen.map(|role| fmlibre_core::training_focus(player, role)).unwrap_or_default(),
+    })
+}
+
+/// One of the manager's tactics as the Line-up section uses it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnTactic {
+    style: Option<String>,
+    copies: usize,
+    slots: Vec<SlotRoles>,
+    /// Slots with a role whose mask the editor does not know yet, in either phase.
+    unknown_roles: usize,
+}
+
+/// The tactics the human manager has picked a team for, the one in use first. Searches the game's memory for them,
+/// which takes a few seconds; only reads.
+#[tauri::command]
+async fn scouting_tactics(app: tauri::AppHandle) -> Result<Vec<OwnTactic>, Failure> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<OwnTactic>, Failure> {
+        let state = app.state::<AppState>();
+        let guard = state.0.lock()?;
+        let connection = guard.as_ref().ok_or_else(not_connected)?;
+        let club = scouting_club(connection)?;
+        let tactics = connection.session.club_tactics(club, &connection.players)?;
+        Ok(tactics
+            .iter()
+            .map(|tactic| OwnTactic {
+                style: tactic.style.clone(),
+                copies: tactic.copies,
+                slots: fmlibre_core::slot_roles(tactic),
+                unknown_roles: tactic
+                    .slots
+                    .iter()
+                    .filter(|slot| slot.in_possession.is_none() || slot.out_of_possession.is_none())
+                    .count(),
+            })
+            .collect())
+    })
+    .await?
+}
+
+/// The best eleven and second eleven the human manager's senior squad fields in the slots `slots` names. Works on the
+/// player list and the squad's list; only reads.
+#[tauri::command]
+fn scouting_lineup(
+    state: State<'_, AppState>,
+    slots: Vec<SlotRoles>,
+    weight: Option<f32>,
+    choice: Option<SquadChoice>,
+) -> Result<Lineup, Failure> {
+    let guard = state.0.lock()?;
+    let connection = guard.as_ref().ok_or_else(not_connected)?;
+    let club = scouting_club(connection)?;
+    let squad = connection.session.lineup_squad(club, &connection.players, choice.unwrap_or_default())?;
+    let weight = weight.unwrap_or(fmlibre_core::IN_POSSESSION_WEIGHT);
+    Ok(fmlibre_core::best_lineup(&slots, &squad, weight))
+}
+
+/// One of the manager's tactics to compare: its style and slots.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnSlots {
+    style: Option<String>,
+    slots: Vec<SlotRoles>,
+}
+
+/// How well the human manager's senior squad fills each of his tactics `own` and the editor's reference formations,
+/// the best covered first. Only reads.
+#[tauri::command]
+fn scouting_compare(
+    state: State<'_, AppState>,
+    own: Vec<OwnSlots>,
+    weight: Option<f32>,
+    choice: Option<SquadChoice>,
+) -> Result<Vec<TacticRank>, Failure> {
+    let guard = state.0.lock()?;
+    let connection = guard.as_ref().ok_or_else(not_connected)?;
+    let club = scouting_club(connection)?;
+    let squad = connection.session.lineup_squad(club, &connection.players, choice.unwrap_or_default())?;
+    let own: Vec<(Option<String>, Vec<SlotRoles>)> = own.into_iter().map(|t| (t.style, t.slots)).collect();
+    let weight = weight.unwrap_or(fmlibre_core::IN_POSSESSION_WEIGHT);
+    Ok(fmlibre_core::compare_tactics(&own, &squad, weight))
+}
+
 /// The teams of the club `uid`, the senior team first, with their players: each one's list
 /// row and the live values a squad screen shows, read now.
 #[tauri::command]
@@ -3675,6 +3794,10 @@ pub fn run() {
             club_squads,
             scouting_overview,
             scouting_suggest,
+            scouting_tactics,
+            scouting_lineup,
+            scouting_compare,
+            player_roles,
             set_captain,
             team_action,
             max_attributes,

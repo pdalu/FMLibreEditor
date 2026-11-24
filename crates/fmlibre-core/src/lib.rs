@@ -18,6 +18,7 @@ mod game;
 mod graphics;
 mod health;
 mod index;
+mod lineup;
 mod loans;
 mod locate;
 mod mass;
@@ -28,6 +29,7 @@ mod players;
 mod profile;
 mod relations;
 mod retirement;
+mod roles;
 pub mod rtti;
 mod scan;
 mod scouting;
@@ -66,6 +68,10 @@ pub use game::{GAME_EXE, GAME_PLUGIN, GameInfo, Storefront};
 pub use graphics::{GraphicsCounts, GraphicsIndex, Picture};
 pub use health::{Check, CheckResult, DateEvidence, DateFit, Health, Lock, STRUCTURE};
 pub use index::{Listed, SearchIndex};
+pub use lineup::{
+    COVERED_FIT, IN_POSSESSION_WEIGHT, Lineup, LineupSlot, Placed, ReferenceTactic, SlotRoles, SquadChoice, TacticRank,
+    Unit, best_lineup, compare_tactics, eleven_gain, reference_tactics, slot_roles,
+};
 pub use loans::{LoanDetails, LoanEnd, LoanTerms};
 pub use locate::{
     DatePlace, Found, Place, date_candidates, holds_retirement_manager, retirement_guesses, search_retirement_manager,
@@ -80,6 +86,7 @@ pub use profile::{
 };
 pub use relations::{HOMEGROWN_RULES, Relation, RelationPlan, RelationSet, Tie, TieTarget};
 pub use retirement::{PlannedRetirement, RetirementPlan, RetirementSet};
+pub use roles::{RoleFit, TrainingFocus, best_role, role_fit, role_fits, training_focus};
 pub use scan::{ArrayCandidate, ScanOptions, VtableCount, scan_object_arrays};
 pub use scouting::{
     Buyer, ClubTactic, Fitting, LIKELY, Line, NOT_FOR_SALE, Phase, Purpose, ROLES, Reason, Role, SCOUT_POSITIONS,

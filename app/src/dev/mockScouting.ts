@@ -4,6 +4,17 @@
 
 import type {
   ClubSummary,
+  Lineup,
+  LineupSlot,
+  OwnTactic,
+  Phase,
+  Placed,
+  PlayerRoles,
+  RoleFit,
+  SlotRoles,
+  SquadChoice,
+  TacticRank,
+  Unit,
   Departure,
   DepartureReason,
   DepthLine,
@@ -51,6 +62,18 @@ const ROLE_LIST: [string, "inPossession" | "outOfPossession", Line][] = [
   ["cfd", "inPossession", "striker"],
   ["dlf", "inPossession", "striker"],
   ["p", "inPossession", "striker"],
+  ["gk", "inPossession", "goalkeeper"],
+  ["wcb", "inPossession", "centreBack"],
+  ["dlp", "inPossession", "defensiveMidfield"],
+  ["cm", "inPossession", "centralMidfield"],
+  ["mpm", "inPossession", "centralMidfield"],
+  ["iw", "inPossession", "wide"],
+  ["wm", "inPossession", "wide"],
+  ["fr", "inPossession", "attackingMidfield"],
+  ["ss", "inPossession", "attackingMidfield"],
+  ["chf", "inPossession", "striker"],
+  ["f9", "inPossession", "striker"],
+  ["tf", "inPossession", "striker"],
   ["sk", "outOfPossession", "goalkeeper"],
   ["lhk", "outOfPossession", "goalkeeper"],
   ["cb", "outOfPossession", "centreBack"],
@@ -75,6 +98,21 @@ const ROLE_LIST: [string, "inPossession" | "outOfPossession", Line][] = [
   ["cfd", "outOfPossession", "striker"],
   ["tcf", "outOfPossession", "striker"],
   ["ocf", "outOfPossession", "striker"],
+  ["gk", "outOfPossession", "goalkeeper"],
+  ["cwd", "outOfPossession", "centreBack"],
+  ["swd", "outOfPossession", "centreBack"],
+  ["pwb", "outOfPossession", "wingBack"],
+  ["sdm", "outOfPossession", "defensiveMidfield"],
+  ["wdm", "outOfPossession", "defensiveMidfield"],
+  ["wcm", "outOfPossession", "centralMidfield"],
+  ["am", "outOfPossession", "attackingMidfield"],
+  ["sam", "outOfPossession", "attackingMidfield"],
+  ["tam", "outOfPossession", "attackingMidfield"],
+  ["wm", "outOfPossession", "wide"],
+  ["twm", "outOfPossession", "wide"],
+  ["owm", "outOfPossession", "wide"],
+  ["wow", "outOfPossession", "wide"],
+  ["scf", "outOfPossession", "striker"],
 ];
 
 const ROLES: Role[] = ROLE_LIST.map(([key, phase, line]) => ({
@@ -314,6 +352,8 @@ function suggestion(f: ScoutingFixtures, player: PlayerSummary, request: ScoutRe
     score: Math.round(score),
     ownerClub: player.clubUid !== null && lender ? lender.name : null,
     ownerClubUid: player.clubUid !== null && lender ? lender.uid : null,
+    // A made-up gain to the best eleven, only when a tactic was asked about.
+    elevenGain: request.tactic ? Math.max(0, Math.round((fitting.fit - 70) / 3 + ((player.uid >> 2) % 3))) : null,
   };
 }
 
@@ -345,6 +385,7 @@ export function scoutingSuggest(f: ScoutingFixtures, request: ScoutRequest): Sco
     order === "fit" ? b.fit - a.fit
     : order === "probability" ? b.probability - a.probability
     : order === "fee" ? (a.fee ?? Infinity) - (b.fee ?? Infinity)
+    : order === "elevenGain" ? (b.elevenGain ?? 0) - (a.elevenGain ?? 0)
     : b.score - a.score);
   return {
     suggestions: suggestions.slice(0, request.limit ?? 50),
@@ -354,5 +395,202 @@ export function scoutingSuggest(f: ScoutingFixtures, request: ScoutRequest): Sco
     examined: f.players.length,
     candidates: fitting.length,
     eligible: suggestions.length,
+  };
+}
+
+// --- Best eleven and tactics -----------------------------------------------------------------------------------------
+
+/** The positions each line plays in, the line's own first, on the right and the left; as the core has them. */
+const LINE_POSITIONS: Record<Line, { right: string[]; left: string[]; either: string[] }> = {
+  goalkeeper: { right: ["gk"], left: ["gk"], either: ["gk"] },
+  centreBack: { right: ["dc"], left: ["dc"], either: ["dc"] },
+  fullBack: { right: ["dr", "wbr"], left: ["dl", "wbl"], either: ["dr", "dl", "wbr", "wbl"] },
+  wingBack: { right: ["wbr", "dr"], left: ["wbl", "dl"], either: ["wbr", "wbl", "dr", "dl"] },
+  defensiveMidfield: { right: ["dm", "mc"], left: ["dm", "mc"], either: ["dm", "mc"] },
+  centralMidfield: { right: ["mc", "dm"], left: ["mc", "dm"], either: ["mc", "dm"] },
+  attackingMidfield: { right: ["amc", "mc"], left: ["amc", "mc"], either: ["amc", "mc"] },
+  wide: { right: ["amr", "mr"], left: ["aml", "ml"], either: ["amr", "aml", "mr", "ml"] },
+  striker: { right: ["st"], left: ["st"], either: ["st"] },
+};
+
+const lineOfRole = (phase: Phase, key: string | null) =>
+  key === null ? null : (ROLE_LIST.find(([k, p]) => k === key && p === phase)?.[2] ?? null);
+
+/** A made-up but steady fit of a fixture player for a role on a side, and the position he would play it in. */
+function roleFitOf(f: ScoutingFixtures, player: PlayerSummary, line: Line, side: SlotRoles["side"], key: string) {
+  const positions = LINE_POSITIONS[line][side ?? "either"];
+  const [position, own] = positions
+    .map((p) => [p, rating(f, player.uid, p)] as const)
+    .reduce((a, b) => (b[1] > a[1] ? b : a));
+  const roleRating = Math.min(20, 4 + player.currentAbility / 13 + ((player.uid + key.length) % 5) / 2);
+  const factor = own >= 18 ? 1 : own >= 15 ? 0.97 : own >= 13 ? 0.88 : own >= 10 ? 0.75 : 0;
+  return { fit: Math.max(0, Math.min(100, Math.round(((roleRating - 5) / 12) * 100 * factor))), position, roleRating, own };
+}
+
+function placedIn(f: ScoutingFixtures, player: PlayerSummary, slot: SlotRoles, weight: number): Placed {
+  const ipLine = lineOfRole("inPossession", slot.inPossession);
+  const oopLine = lineOfRole("outOfPossession", slot.outOfPossession);
+  const ip = ipLine ? roleFitOf(f, player, ipLine, slot.side, slot.inPossession!) : null;
+  const oop = oopLine ? roleFitOf(f, player, oopLine, slot.side, slot.outOfPossession!) : null;
+  const fit = ip && oop ? Math.round(weight * ip.fit + (1 - weight) * oop.fit) : (ip ?? oop)?.fit ?? 0;
+  return { player, fit, inPossession: ip?.fit ?? null, outOfPossession: oop?.fit ?? null, position: (ip ?? oop)?.position ?? null };
+}
+
+/** The senior squad of the fixtures' human club. */
+const squadOf = (f: ScoutingFixtures, choice: SquadChoice) =>
+  f.players.filter((p) => p.clubUid === humanClub(f).uid && !(choice.availableOnly && p.uid % 10 === 3));
+
+/** The best slot by slot: the fixtures stand in for the core's exact assignment. */
+function pick(f: ScoutingFixtures, slots: SlotRoles[], players: PlayerSummary[], weight: number): (Placed | null)[] {
+  const left = new Set(players.map((p) => p.uid));
+  return slots.map((slot) => {
+    const best = players
+      .filter((p) => left.has(p.uid))
+      .map((p) => placedIn(f, p, slot, weight))
+      .filter((placed) => placed.fit > 0)
+      .sort((a, b) => b.fit - a.fit)[0];
+    if (!best) return null;
+    left.delete(best.player.uid);
+    return best;
+  });
+}
+
+const averageOf = (placed: (Placed | null)[]) =>
+  placed.length ? placed.reduce((sum, p) => sum + (p?.fit ?? 0), 0) / placed.length : 0;
+
+const POSITION_OF_LINE: Record<Line, { right: string; left: string } | string> = {
+  goalkeeper: "gk",
+  centreBack: "dc",
+  fullBack: { right: "dr", left: "dl" },
+  wingBack: { right: "wbr", left: "wbl" },
+  defensiveMidfield: "dm",
+  centralMidfield: "mc",
+  attackingMidfield: "amc",
+  wide: { right: "amr", left: "aml" },
+  striker: "st",
+};
+
+export function scoutingLineup(f: ScoutingFixtures, slots: SlotRoles[], weight: number, choice: SquadChoice): Lineup {
+  const squad = squadOf(f, choice);
+  const first = pick(f, slots, squad, weight);
+  const starting = new Set(first.flatMap((p) => (p ? [p.player.uid] : [])));
+  const rest = squad.filter((p) => !starting.has(p.uid));
+  const second = pick(f, slots, rest, weight);
+  const lineupSlots: LineupSlot[] = slots.map((slot, index) => {
+    const line = lineOfRole("inPossession", slot.inPossession) ?? lineOfRole("outOfPossession", slot.outOfPossession);
+    const at = line ? POSITION_OF_LINE[line] : null;
+    const position = at === null ? null : typeof at === "string" ? at : slot.side ? at[slot.side] : null;
+    const cover = rest
+      .map((p) => placedIn(f, p, slot, weight))
+      .filter((p) => p.fit > 0)
+      .sort((a, b) => b.fit - a.fit)
+      .slice(0, 3);
+    return { ...slot, index, line, position, first: first[index], second: second[index], cover };
+  });
+  return { slots: lineupSlots, firstAverage: averageOf(first), secondAverage: averageOf(second), squadSize: squad.length };
+}
+
+const s = (inPossession: string, outOfPossession: string, side: SlotRoles["side"] = null): SlotRoles => ({
+  inPossession,
+  outOfPossession,
+  side,
+});
+
+/** The manager's tactic in the fixtures: a 4-3-3, with one role the editor does not know in each phase. */
+const OWN_TACTICS: OwnTactic[] = [
+  {
+    style: "CONT",
+    copies: 3,
+    unknownRoles: 1,
+    slots: [
+      s("bgk", "sk"),
+      s("ifb", "fb", "right"),
+      s("bcb", "cb"),
+      s("cb", "ccb"),
+      s("wb", "fb", "left"),
+      s("dm", "dm"),
+      s("bbm", "pcm"),
+      { inPossession: "ap", outOfPossession: null, side: null },
+      s("if", "tw", "right"),
+      s("w", "tw", "left"),
+      s("cfd", "ocf"),
+    ],
+  },
+];
+
+export const scoutingTactics = (): OwnTactic[] => OWN_TACTICS;
+
+/** The core's formations, as `reference_tactics` lists them. */
+const REFERENCES: [string, SlotRoles[]][] = [
+  ["4-2-3-1", [s("gk", "gk"), s("fb", "fb", "right"), s("cb", "cb"), s("bcb", "cb"), s("fb", "fb", "left"), s("dm", "dm"), s("bbm", "cm"), s("w", "w", "right"), s("am", "am"), s("if", "w", "left"), s("cfd", "cfd")]],
+  ["4-3-3", [s("gk", "gk"), s("fb", "fb", "right"), s("cb", "cb"), s("bcb", "cb"), s("fb", "fb", "left"), s("dm", "dm"), s("cm", "cm"), s("bbm", "pcm"), s("if", "tw", "right"), s("w", "tw", "left"), s("cfd", "cfd")]],
+  ["4-4-2", [s("gk", "gk"), s("fb", "fb", "right"), s("cb", "cb"), s("ncb", "cb"), s("fb", "fb", "left"), s("wm", "wm", "right"), s("cm", "cm"), s("bbm", "pcm"), s("wm", "wm", "left"), s("dlf", "cfd"), s("p", "ocf")]],
+  ["3-5-2", [s("gk", "gk"), s("wcb", "wcb"), s("cb", "cb"), s("wcb", "wcb"), s("wb", "wb", "right"), s("dm", "dm"), s("cm", "cm"), s("ap", "cm"), s("wb", "wb", "left"), s("cfd", "cfd"), s("p", "ocf")]],
+  ["3-4-2-1", [s("gk", "gk"), s("wcb", "wcb"), s("cb", "cb"), s("wcb", "wcb"), s("wb", "wb", "right"), s("dm", "dm"), s("bbm", "pcm"), s("wb", "wb", "left"), s("am", "am"), s("ss", "sam"), s("cfd", "cfd")]],
+];
+
+const UNIT_OF: Record<Line, Unit> = {
+  goalkeeper: "goalkeeper",
+  centreBack: "defence",
+  fullBack: "defence",
+  wingBack: "defence",
+  defensiveMidfield: "midfield",
+  centralMidfield: "midfield",
+  attackingMidfield: "attack",
+  wide: "attack",
+  striker: "attack",
+};
+
+function rankOf(f: ScoutingFixtures, slots: SlotRoles[], weight: number, choice: SquadChoice) {
+  const lineup = scoutingLineup(f, slots, weight, choice);
+  const units: [Unit, number][] = [];
+  for (const unit of ["goalkeeper", "defence", "midfield", "attack"] as Unit[]) {
+    const fits = lineup.slots.filter((slot) => slot.line && UNIT_OF[slot.line] === unit).map((slot) => slot.first?.fit ?? 0);
+    if (fits.length) units.push([unit, fits.reduce((a, b) => a + b, 0) / fits.length]);
+  }
+  return {
+    slots,
+    covered: lineup.slots.filter((slot) => (slot.first?.fit ?? 0) >= 60).length,
+    size: slots.length,
+    firstAverage: lineup.firstAverage,
+    secondAverage: lineup.secondAverage,
+    units,
+  };
+}
+
+export function scoutingCompare(
+  f: ScoutingFixtures,
+  own: { style: string | null; slots: SlotRoles[] }[],
+  weight: number,
+  choice: SquadChoice,
+): TacticRank[] {
+  const ranks: TacticRank[] = [
+    ...own.map((tactic, i) => ({ name: null, own: i, style: tactic.style, ...rankOf(f, tactic.slots, weight, choice) })),
+    ...REFERENCES.map(([name, slots]) => ({ name, own: null, style: null, ...rankOf(f, slots, weight, choice) })),
+  ];
+  return ranks.sort((a, b) => b.covered - a.covered || b.firstAverage - a.firstAverage);
+}
+
+/** A fixture player's roles, and made-up training advice for the best one in possession or `asked`. */
+export function playerRoles(f: ScoutingFixtures, uid: number, asked: { key: string; phase: Phase } | null): PlayerRoles {
+  const player = f.players.find((p) => p.uid === uid);
+  if (!player) {
+    throw { code: "notFound", message: `no player ${uid}`, params: {} };
+  }
+  const fits: RoleFit[] = ROLE_LIST.map(([key, phase, line]) => {
+    const { fit, position, roleRating, own } = roleFitOf(f, player, line, null, key);
+    return { key, phase, line, fit, rating: Math.round(roleRating * 10) / 10, position, positionRating: own };
+  }).sort((a, b) => b.fit - a.fit);
+  const role = asked ?? fits.find((fit) => fit.phase === "inPossession") ?? null;
+  const pool = ["passing", "first_touch", "decisions", "composure", "stamina", "work_rate", "acceleration"];
+  return {
+    fits,
+    trainingRole: role ? { key: role.key, phase: role.phase } : null,
+    training: pool.slice(0, 5).map((attribute, i) => ({
+      attribute,
+      value: 9 + ((player.uid + i) % 8),
+      gain: Math.round((2.4 - i * 0.3) * 10) / 10,
+      key: i < 3,
+    })),
   };
 }

@@ -14,10 +14,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use fmlibre_core::{
     ATTRIBUTE_GROUPS, ArrayCandidate, ArrayRvas, ArraySource, AttributeBound, BuildProfile, Buyer, CaptainRole,
     ClubIndex, Entity, ExportFormat, ExportHeader, Field, FmDate, Found, GAME_EXE, GAME_PLUGIN, GameInfo,
-    GraphicsIndex, Kind, Loan, MANAGER, MoveTerms, PERSONALITY, POSITIONS, Picture, PlayerFilter, PlayerIndex,
-    PlayerOrder, PlayerSort, ProfileNotes, Purpose, STAFF_ATTRIBUTE_GROUPS, SUPPORTER_MIX, SUPPORTER_TRAITS, Scale,
-    ScanOptions, ScoutOrder, ScoutRequest, Session, SessionError, StaffIndex, Target, Tie, TieTarget, find_game,
-    job_name, nations, profile_text, scan_object_arrays, sort_players,
+    GraphicsIndex, IN_POSSESSION_WEIGHT, Kind, Loan, MANAGER, MoveTerms, PERSONALITY, POSITIONS, Picture, PlayerFilter,
+    PlayerIndex, PlayerOrder, PlayerSort, ProfileNotes, Purpose, STAFF_ATTRIBUTE_GROUPS, SUPPORTER_MIX,
+    SUPPORTER_TRAITS, Scale, ScanOptions, ScoutOrder, ScoutRequest, Session, SessionError, SquadChoice, StaffIndex,
+    Target, Tie, TieTarget, best_lineup, compare_tactics, find_game, job_name, nations, profile_text,
+    reference_tactics, scan_object_arrays, slot_roles, sort_players,
 };
 #[cfg(target_os = "macos")]
 use fmlibre_mem::MachImage;
@@ -5221,7 +5222,11 @@ fn scout(
 
     if tactics {
         let started = Instant::now();
-        let tactics = session.club_tactics(club, &players)?;
+        // Without the manager's tactics, the squad is still measured against the editor's formations.
+        let tactics = session.club_tactics(club, &players).unwrap_or_else(|err| {
+            println!("\nno tactic read: {err}");
+            Vec::new()
+        });
         println!("\n{} tactic(s) in {:.1} s", tactics.len(), started.elapsed().as_secs_f64());
         for (i, tactic) in tactics.iter().enumerate() {
             println!("tactic {i} (style {}, {} copies)", tactic.style.as_deref().unwrap_or("?"), tactic.copies);
@@ -5235,6 +5240,49 @@ fn scout(
                     name(s.player)
                 );
             }
+        }
+        // The best eleven of the senior squad in the tactic in use, and how the squad fills each tactic.
+        let squad = session.lineup_squad(club, &players, SquadChoice::default())?;
+        let (label, slots) = match tactics.first() {
+            Some(tactic) => ("tactic 0".to_owned(), slot_roles(tactic)),
+            None => {
+                let reference = reference_tactics().swap_remove(0);
+                (reference.name.to_owned(), reference.slots)
+            }
+        };
+        {
+            let started = Instant::now();
+            let lineup = best_lineup(&slots, &squad, IN_POSSESSION_WEIGHT);
+            println!(
+                "\nbest eleven of {} players in {label}: average fit {:.1}, second eleven {:.1}, in {:.3} s",
+                lineup.squad_size,
+                lineup.first_average,
+                lineup.second_average,
+                started.elapsed().as_secs_f64()
+            );
+            for slot in &lineup.slots {
+                let placed = |p: &Option<fmlibre_core::Placed>| {
+                    p.as_ref().map_or("-".to_owned(), |p| format!("{} {}", p.player.name, p.fit))
+                };
+                println!(
+                    "  {:>2}  {:<5} {:<5} {:<4} {:<30} {}",
+                    slot.index,
+                    slot.roles.in_possession.as_deref().unwrap_or("?"),
+                    slot.roles.out_of_possession.as_deref().unwrap_or("?"),
+                    slot.position.unwrap_or("?"),
+                    placed(&slot.first),
+                    placed(&slot.second)
+                );
+            }
+        }
+        let own: Vec<_> = tactics.iter().map(|t| (t.style.clone(), slot_roles(t))).collect();
+        println!("\ntactics by how well the squad fills them:");
+        for rank in compare_tactics(&own, &squad, IN_POSSESSION_WEIGHT) {
+            let name = rank.name.map_or_else(|| format!("own {}", rank.own.unwrap_or(0)), str::to_owned);
+            println!(
+                "  {:<8} {:>2}/{}  first {:.1}  second {:.1}",
+                name, rank.covered, rank.size, rank.first_average, rank.second_average
+            );
         }
     }
 

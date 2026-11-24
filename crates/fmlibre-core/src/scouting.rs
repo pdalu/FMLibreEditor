@@ -162,7 +162,8 @@ pub struct Role {
     pub key: &'static str,
     pub phase: Phase,
     pub line: Line,
-    /// The mask the game stores.
+    /// The mask the game stores; 0 for a role whose mask has not been read on the tactics screen yet, which a tactic's
+    /// slot is then never taken for.
     #[serde(skip)]
     pub mask: u64,
     /// The attributes it leans on most, and the ones that help.
@@ -185,9 +186,21 @@ macro_rules! role {
             other_attributes: &[$($o),*],
         }
     };
+    ($key:literal, $phase:ident, $line:ident, unknown, [$($k:literal),*], [$($o:literal),*]) => {
+        Role {
+            key: $key,
+            phase: Phase::$phase,
+            line: Line::$line,
+            mask: 0,
+            key_attributes: &[$($k),*],
+            other_attributes: &[$($o),*],
+        }
+    };
 }
 
-/// The roles whose masks are known: read on Monza's tactic (Steam build 26340721) in three formations and role sets.
+/// Every role of the game's tactics screen: 40 for when the team has the ball and 39 for when it has not. The masks
+/// were read on Monza's tactic (Steam build 26340721) in three formations and role sets; the roles marked `unknown`
+/// were not among them, and are measured but not yet recognised in a tactic.
 pub const ROLES: &[Role] = &[
     // In possession.
     role!(
@@ -414,6 +427,102 @@ pub const ROLES: &[Role] = &[
         ["finishing", "off_the_ball", "anticipation", "composure", "acceleration"],
         ["first_touch", "heading", "pace", "agility"]
     ),
+    role!(
+        "gk",
+        InPossession,
+        Goalkeeper,
+        unknown,
+        ["handling", "reflexes", "positioning", "one_on_ones", "command_of_area", "kicking"],
+        ["aerial_reach", "communication", "concentration", "passing"]
+    ),
+    role!(
+        "wcb",
+        InPossession,
+        CentreBack,
+        unknown,
+        ["tackling", "marking", "positioning", "passing", "pace", "stamina"],
+        ["crossing", "dribbling", "first_touch", "heading", "anticipation"]
+    ),
+    role!(
+        "dlp",
+        InPossession,
+        DefensiveMidfield,
+        unknown,
+        ["passing", "vision", "first_touch", "technique", "composure", "decisions"],
+        ["anticipation", "positioning", "teamwork", "tackling"]
+    ),
+    role!(
+        "cm",
+        InPossession,
+        CentralMidfield,
+        unknown,
+        ["passing", "first_touch", "decisions", "teamwork", "work_rate", "stamina"],
+        ["tackling", "technique", "off_the_ball", "vision", "composure"]
+    ),
+    role!(
+        "mpm",
+        InPossession,
+        CentralMidfield,
+        unknown,
+        ["passing", "vision", "first_touch", "technique", "decisions", "composure"],
+        ["off_the_ball", "flair", "anticipation", "dribbling", "agility"]
+    ),
+    role!(
+        "iw",
+        InPossession,
+        Wide,
+        unknown,
+        ["dribbling", "passing", "technique", "first_touch", "vision", "acceleration"],
+        ["flair", "agility", "off_the_ball", "decisions", "long_shots"]
+    ),
+    role!(
+        "wm",
+        InPossession,
+        Wide,
+        unknown,
+        ["crossing", "work_rate", "stamina", "passing", "teamwork", "decisions"],
+        ["dribbling", "first_touch", "technique", "off_the_ball", "pace"]
+    ),
+    role!(
+        "fr",
+        InPossession,
+        AttackingMidfield,
+        unknown,
+        ["flair", "technique", "dribbling", "first_touch", "passing", "vision"],
+        ["off_the_ball", "composure", "decisions", "finishing", "agility", "anticipation"]
+    ),
+    role!(
+        "ss",
+        InPossession,
+        AttackingMidfield,
+        unknown,
+        ["off_the_ball", "finishing", "anticipation", "composure", "first_touch", "acceleration"],
+        ["dribbling", "technique", "long_shots", "pace", "decisions"]
+    ),
+    role!(
+        "chf",
+        InPossession,
+        Striker,
+        unknown,
+        ["off_the_ball", "pace", "acceleration", "dribbling", "finishing", "work_rate"],
+        ["first_touch", "stamina", "technique", "anticipation", "composure"]
+    ),
+    role!(
+        "f9",
+        InPossession,
+        Striker,
+        unknown,
+        ["first_touch", "passing", "technique", "vision", "dribbling", "decisions"],
+        ["composure", "off_the_ball", "flair", "agility", "anticipation", "finishing"]
+    ),
+    role!(
+        "tf",
+        InPossession,
+        Striker,
+        unknown,
+        ["heading", "strength", "jumping_reach", "bravery", "finishing", "composure"],
+        ["first_touch", "balance", "off_the_ball", "aggression", "anticipation"]
+    ),
     // Out of possession.
     role!(
         "sk",
@@ -607,11 +716,131 @@ pub const ROLES: &[Role] = &[
         ["off_the_ball", "anticipation", "acceleration", "pace", "strength", "first_touch"],
         ["composure", "finishing"]
     ),
+    role!(
+        "gk",
+        OutOfPossession,
+        Goalkeeper,
+        unknown,
+        ["handling", "reflexes", "positioning", "one_on_ones", "command_of_area", "concentration"],
+        ["aerial_reach", "communication", "decisions"]
+    ),
+    role!(
+        "cwd",
+        OutOfPossession,
+        CentreBack,
+        unknown,
+        ["positioning", "anticipation", "pace", "acceleration", "concentration", "marking"],
+        ["tackling", "stamina", "decisions"]
+    ),
+    role!(
+        "swd",
+        OutOfPossession,
+        CentreBack,
+        unknown,
+        ["tackling", "aggression", "anticipation", "bravery", "pace", "marking"],
+        ["stamina", "strength", "decisions", "positioning"]
+    ),
+    role!(
+        "pwb",
+        OutOfPossession,
+        WingBack,
+        unknown,
+        ["work_rate", "stamina", "tackling", "aggression", "acceleration", "pace"],
+        ["anticipation", "teamwork", "bravery", "marking"]
+    ),
+    role!(
+        "sdm",
+        OutOfPossession,
+        DefensiveMidfield,
+        unknown,
+        ["positioning", "anticipation", "concentration", "marking", "teamwork", "decisions"],
+        ["tackling", "composure", "strength"]
+    ),
+    role!(
+        "wdm",
+        OutOfPossession,
+        DefensiveMidfield,
+        unknown,
+        ["positioning", "tackling", "work_rate", "stamina", "anticipation", "pace"],
+        ["marking", "teamwork", "acceleration"]
+    ),
+    role!(
+        "wcm",
+        OutOfPossession,
+        CentralMidfield,
+        unknown,
+        ["work_rate", "stamina", "tackling", "positioning", "teamwork", "pace"],
+        ["marking", "anticipation", "acceleration"]
+    ),
+    role!(
+        "am",
+        OutOfPossession,
+        AttackingMidfield,
+        unknown,
+        ["work_rate", "teamwork", "anticipation", "positioning", "stamina"],
+        ["tackling", "decisions", "aggression"]
+    ),
+    role!(
+        "sam",
+        OutOfPossession,
+        AttackingMidfield,
+        unknown,
+        ["off_the_ball", "anticipation", "acceleration", "pace", "composure", "finishing"],
+        ["first_touch", "dribbling", "decisions"]
+    ),
+    role!(
+        "tam",
+        OutOfPossession,
+        AttackingMidfield,
+        unknown,
+        ["work_rate", "stamina", "tackling", "teamwork", "positioning", "marking"],
+        ["aggression", "anticipation", "concentration"]
+    ),
+    role!(
+        "wm",
+        OutOfPossession,
+        Wide,
+        unknown,
+        ["work_rate", "stamina", "teamwork", "positioning", "anticipation"],
+        ["tackling", "pace", "acceleration", "decisions"]
+    ),
+    role!(
+        "twm",
+        OutOfPossession,
+        Wide,
+        unknown,
+        ["work_rate", "stamina", "tackling", "teamwork", "positioning", "marking"],
+        ["pace", "acceleration", "anticipation", "concentration"]
+    ),
+    role!(
+        "owm",
+        OutOfPossession,
+        Wide,
+        unknown,
+        ["off_the_ball", "pace", "acceleration", "anticipation", "first_touch", "stamina"],
+        ["composure", "dribbling", "crossing"]
+    ),
+    role!(
+        "wow",
+        OutOfPossession,
+        Wide,
+        unknown,
+        ["off_the_ball", "pace", "acceleration", "anticipation", "first_touch", "crossing"],
+        ["dribbling", "composure", "stamina"]
+    ),
+    role!(
+        "scf",
+        OutOfPossession,
+        Striker,
+        unknown,
+        ["off_the_ball", "anticipation", "acceleration", "pace", "finishing", "composure"],
+        ["first_touch", "dribbling", "strength"]
+    ),
 ];
 
 /// The role with this mask in `phase`.
 pub fn role_of_mask(phase: Phase, mask: u64) -> Option<&'static Role> {
-    ROLES.iter().find(|role| role.phase == phase && role.mask == mask)
+    ROLES.iter().find(|role| role.phase == phase && role.mask != 0 && role.mask == mask)
 }
 
 /// The role with this key in `phase`.
@@ -821,7 +1050,7 @@ impl Session {
 }
 
 /// The side a player of a sided line plays best, from his ratings; none for a central line or a tie.
-fn side_of(line: Line, ratings: &[u8; 15]) -> Option<Side> {
+pub(crate) fn side_of(line: Line, ratings: &[u8; 15]) -> Option<Side> {
     let (right, left) = line.sides()?;
     let best = |positions: &[usize]| positions.iter().map(|&i| ratings[i]).max().unwrap_or(0);
     match best(right).cmp(&best(left)) {
@@ -833,7 +1062,7 @@ fn side_of(line: Line, ratings: &[u8; 15]) -> Option<Side> {
 
 /// The position a tactic slot most likely is, from its line and side: a key of `crate::POSITIONS`. A sided line
 /// whose side is not known gives none.
-fn position_of(line: Line, side: Option<Side>) -> Option<&'static str> {
+pub(crate) fn position_of(line: Line, side: Option<Side>) -> Option<&'static str> {
     Some(match (line, side) {
         (Line::Goalkeeper, _) => "gk",
         (Line::CentreBack, _) => "dc",
@@ -910,6 +1139,8 @@ pub enum ScoutOrder {
     Probability,
     /// Cheapest first.
     Fee,
+    /// The most he would raise the best eleven of the tactic asked about first.
+    ElevenGain,
 }
 
 /// What a recommendation is asked for.
@@ -933,6 +1164,11 @@ pub struct ScoutRequest {
     pub order: ScoutOrder,
     /// How many to return; 50 when none.
     pub limit: Option<usize>,
+    /// A tactic's slots: each suggestion then says how much he would raise the best eleven the club's senior squad
+    /// fields in it (see [`crate::lineup`]).
+    pub tactic: Option<Vec<crate::lineup::SlotRoles>>,
+    /// The share of a slot's value its role in possession has there, 0 to 1; 0.6 when none.
+    pub in_possession_weight: Option<f32>,
 }
 
 /// Why a player looks more or less likely to join, with the value it is about.
@@ -986,6 +1222,8 @@ pub struct Suggestion {
     /// second team he plays in), which would sell him.
     pub owner_club: Option<String>,
     pub owner_club_uid: Option<u32>,
+    /// How much he would raise the average fit (0–100) of the best eleven of the tactic asked about, when one was.
+    pub eleven_gain: Option<f32>,
 }
 
 /// The recommendations and what they were measured against.
@@ -1021,7 +1259,7 @@ fn weights(role: &Role, places: &HashMap<&str, usize>) -> Vec<(usize, f32)> {
 }
 
 /// A player's attributes for a role, 1–20.
-fn role_rating(attributes: &[u8], weights: &[(usize, f32)]) -> Option<f32> {
+pub(crate) fn role_rating(attributes: &[u8], weights: &[(usize, f32)]) -> Option<f32> {
     let (mut sum, mut total) = (0.0, 0.0);
     for &(i, weight) in weights {
         let value = *attributes.get(i)?;
@@ -1033,7 +1271,7 @@ fn role_rating(attributes: &[u8], weights: &[(usize, f32)]) -> Option<f32> {
 
 /// How much of his attributes a player brings to a position rated `rating` (1–20): all of them from 15, where the
 /// game calls him accomplished there, less below.
-fn position_factor(rating: u8) -> f32 {
+pub(crate) fn position_factor(rating: u8) -> f32 {
     match rating {
         18.. => 1.0,
         15..=17 => 0.97,
@@ -1240,6 +1478,18 @@ impl Session {
             .filter(|s| request.max_fee.is_none_or(|max| s.fee.is_some_and(|fee| fee <= max)))
             .filter(|s| request.min_probability.is_none_or(|min| s.probability >= min))
             .collect();
+        if let Some(tactic) = request.tactic.as_deref().filter(|tactic| !tactic.is_empty()) {
+            let weight = request.in_possession_weight.unwrap_or(crate::lineup::IN_POSSESSION_WEIGHT);
+            let squad = self.lineup_squad(buyer.club, players, crate::lineup::SquadChoice::default())?;
+            let base = crate::lineup::best_lineup(tactic, &squad, weight).first_average;
+            let mut with = squad.clone();
+            for suggestion in &mut suggestions {
+                with.push(&suggestion.fitting.player);
+                let first = crate::lineup::best_lineup(tactic, &with, weight).first_average;
+                with.pop();
+                suggestion.eleven_gain = Some(((first - base).max(0.0) * 10.0).round() / 10.0);
+            }
+        }
         match request.order {
             ScoutOrder::Score => {
                 suggestions.sort_by(|a, b| b.score.cmp(&a.score).then(b.fitting.fit.cmp(&a.fitting.fit)))
@@ -1252,6 +1502,9 @@ impl Session {
             }
             ScoutOrder::Fee => suggestions.sort_by(|a, b| {
                 a.fee.unwrap_or(i64::MAX).cmp(&b.fee.unwrap_or(i64::MAX)).then(b.fitting.fit.cmp(&a.fitting.fit))
+            }),
+            ScoutOrder::ElevenGain => suggestions.sort_by(|a, b| {
+                b.eleven_gain.unwrap_or(0.0).total_cmp(&a.eleven_gain.unwrap_or(0.0)).then(b.score.cmp(&a.score))
             }),
         }
         suggestions.truncate(request.limit.unwrap_or(50).clamp(1, 200));
@@ -1328,6 +1581,7 @@ impl Session {
             score: score(purpose, m.fit, probability, player),
             owner_club: lent.and_then(|uid| looking.clubs.get(uid)).map(|club| club.name.clone()),
             owner_club_uid: lent,
+            eleven_gain: None,
         }
     }
 
@@ -1520,16 +1774,25 @@ mod tests {
 
     #[test]
     fn every_mask_is_two_bits_with_one_of_21_to_23() {
-        for role in ROLES {
+        for role in ROLES.iter().filter(|role| role.mask != 0) {
             assert!(looks_like_role(role.mask), "{} {:?} {:x}", role.key, role.phase, role.mask);
         }
+    }
+
+    #[test]
+    fn every_role_of_the_game_is_listed() {
+        let count = |phase: Phase| ROLES.iter().filter(|role| role.phase == phase).count();
+        assert_eq!(count(Phase::InPossession), 40);
+        assert_eq!(count(Phase::OutOfPossession), 39);
+        assert_eq!(ROLES.iter().filter(|role| role.mask != 0).count(), 52);
+        assert!(role_of_mask(Phase::InPossession, 0).is_none());
     }
 
     #[test]
     fn masks_are_unique_within_a_phase() {
         for (i, a) in ROLES.iter().enumerate() {
             for b in &ROLES[i + 1..] {
-                assert!(!(a.phase == b.phase && a.mask == b.mask), "{} and {}", a.key, b.key);
+                assert!(!(a.phase == b.phase && a.mask != 0 && a.mask == b.mask), "{} and {}", a.key, b.key);
                 assert!(!(a.phase == b.phase && a.key == b.key), "{} twice", a.key);
             }
         }

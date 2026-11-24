@@ -38,6 +38,7 @@ import type {
   ScoutingOverview,
   ScoutPosition,
   ScoutRequest,
+  SlotRoles,
   Suggestion,
 } from "./types";
 
@@ -108,7 +109,7 @@ const PAGE = 50;
 const MOST = 200;
 
 /** The columns the advice can be sorted by; `rank` is the scout's own order, best first. */
-type AdviceSort = "rank" | "name" | "age" | "ca" | "pa" | "fit" | "probability" | "fee";
+type AdviceSort = "rank" | "name" | "age" | "ca" | "pa" | "fit" | "probability" | "fee" | "elevenGain";
 
 /** The columns that sort from the lowest first when picked; the others start with the highest. */
 const ASCENDING_FIRST: ReadonlySet<AdviceSort> = new Set(["rank", "name", "age", "fee"]);
@@ -172,6 +173,8 @@ function sortValue(entry: Ranked, by: AdviceSort): number | string | null {
       return s.probability;
     case "fee":
       return s.fee;
+    case "elevenGain":
+      return s.elevenGain;
   }
 }
 
@@ -197,9 +200,12 @@ interface Props {
   onBrief: (patch: Partial<Brief>) => void;
   onOpen: (player: PlayerSummary) => void;
   hidden: boolean;
+  /** The tactic of the Best eleven section, once read: each recommendation then says how much he would raise its
+   * best eleven. */
+  tactic: { slots: SlotRoles[]; label: string; weight: number } | null;
 }
 
-export function ScoutRecommendations({ overview, version, brief, onBrief, onOpen, hidden }: Props) {
+export function ScoutRecommendations({ overview, version, brief, onBrief, onOpen, hidden, tactic }: Props) {
   const position = overview.positions.find((p) => p.key === brief.position);
   const statusOf = useMemo(() => new Map(overview.report.lines.map((line) => [line.key, line])), [overview]);
 
@@ -232,8 +238,10 @@ export function ScoutRecommendations({ overview, version, brief, onBrief, onOpen
       noFreeAgents: brief.noFreeAgents,
       order: "score",
       limit,
+      tactic: tactic?.slots ?? null,
+      inPossessionWeight: tactic?.weight ?? null,
     };
-  }, [brief, limit]);
+  }, [brief, limit, tactic]);
   const requestKey = JSON.stringify(request);
 
   const [result, setResult] = useState<Scouted | null>(null);
@@ -276,13 +284,13 @@ export function ScoutRecommendations({ overview, version, brief, onBrief, onOpen
     () => sortAdvice((result?.suggestions ?? []).map((suggestion, i) => ({ suggestion, rank: i + 1 })), order),
     [result, order],
   );
-  const header = (by: AdviceSort, label: string, className?: string, extra?: ReactNode) => (
+  const header = (by: AdviceSort, label: string, className?: string, extra?: ReactNode, title?: string) => (
     <SortHeader
       by={by}
       order={order}
       onSort={sortBy}
       label={label}
-      title={text.sortBy(text.sortNames[by])}
+      title={title ?? text.sortBy(text.sortNames[by])}
       className={className}
     >
       {extra}
@@ -487,12 +495,20 @@ export function ScoutRecommendations({ overview, version, brief, onBrief, onOpen
                   {header("fit", text.columns.fit)}
                   {header("probability", text.columns.probability, "num scout-col-probability", <ProbabilityInfo />)}
                   {header("fee", text.columns.money, "num")}
+                  {tactic &&
+                    header("elevenGain", text.columns.elevenGain, "num scout-col-gain", undefined, text.elevenGainTitle(tactic.label))}
                   <th>{text.columns.note}</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map(({ suggestion, rank }) => (
-                  <SuggestionRow key={suggestion.player.uid} rank={rank} suggestion={suggestion} onOpen={onOpen} />
+                  <SuggestionRow
+                    key={suggestion.player.uid}
+                    rank={rank}
+                    suggestion={suggestion}
+                    onOpen={onOpen}
+                    gain={tactic !== null}
+                  />
                 ))}
               </tbody>
             </table>
@@ -586,10 +602,13 @@ function SuggestionRow({
   rank,
   suggestion: s,
   onOpen,
+  gain,
 }: {
   rank: number;
   suggestion: Suggestion;
   onOpen: (player: PlayerSummary) => void;
+  /** Whether the table has the column of the gain to the best eleven. */
+  gain: boolean;
 }) {
   const level = s.probability >= 70 ? "good" : s.probability >= 50 ? "ok" : "poor";
   const shown = s.reasons.slice(0, 2);
@@ -623,6 +642,11 @@ function SuggestionRow({
         <span className="scout-fee">{s.fee === null ? text.none : shortMoney(s.fee)}</span>
         <span className="sub">{s.wage === null ? text.none : `${shortMoney(s.wage)}${text.perWeek}`}</span>
       </td>
+      {gain && (
+        <td className={`num scout-gain${s.elevenGain !== null && s.elevenGain > 0 ? " pos" : " muted"}`}>
+          {s.elevenGain === null ? text.none : s.elevenGain > 0 ? `+${formatNumber(s.elevenGain, { maximumFractionDigits: 1 })}` : "0"}
+        </td>
+      )}
       <td className="scout-note-cell" title={all || undefined}>
         <div className="scout-reasons">
           {shown.map((r) => (

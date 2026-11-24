@@ -12,6 +12,7 @@ import { MedicalGroup } from "./MedicalGroup";
 import { MoveButton } from "./MoveDialog";
 import { ClubLogo, NationFlag, PersonFace, PICTURE_SIZE, WithPicture } from "./Picture";
 import { FEET, GOALKEEPING, HIDDEN, isGoalkeeper, MENTAL, PHYSICAL, TECHNICAL } from "./playerAttributes";
+import { PlayerRolesGroup } from "./PlayerRoles";
 import { PositionFreeze, PositionPitch, PositionRatings } from "./PositionPitch";
 import { PermanentDialog } from "./PermanentDialog";
 import { RecallDialog } from "./RecallDialog";
@@ -185,6 +186,8 @@ function ProfileBody({ details }: { details: PlayerDetails }) {
       </div>
 
       <PositionRatings ratings={details.positionRatings} />
+
+      <PlayerRolesGroup uid={details.uid} stamp={details} />
 
       <MedicalGroup details={details} />
 

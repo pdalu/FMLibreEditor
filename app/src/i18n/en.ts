@@ -2235,6 +2235,8 @@ export const en = {
       recommend: "Transfer advice",
       depth: "Squad depth",
       departures: "Players to let go",
+      lineup: "Best eleven",
+      tactics: "Tactics",
     },
     /** The depth statuses: the dots on the pitch and the badges of the cards. */
     status: {
@@ -2333,6 +2335,7 @@ export const en = {
       fit: "fit",
       probability: "probability",
       fee: "fee",
+      elevenGain: "gain to your best eleven",
     },
     backToScoutOrder: "Back to the scout's order",
     showMore: (count: number) => `Show ${format(count)} more`,
@@ -2353,7 +2356,11 @@ export const en = {
       note: "Scout's note",
       money: "Fee",
       value: "Value",
+      elevenGain: "XI +",
     },
+    /** The hover of the gain to the best eleven, with the tactic it was measured in. */
+    elevenGainTitle: (tactic: string) =>
+      `How much he would raise the average fit (0–100) of your best eleven in ${tactic}`,
     probabilityInfo:
       "How likely the player is to join your club — an estimate from his value, contract, club and reputation.",
     probabilityInfoLabel: "What is probability?",
@@ -2430,6 +2437,72 @@ export const en = {
         return `${line} · ${rank}${suffix}`;
       },
     },
+    /** The Best eleven section: the strongest eleven and second eleven of the senior squad in a tactic. */
+    lineup: {
+      reading: "Reading your tactics from the game…",
+      tactic: "Tactic",
+      own: (index: number, style: string | null) =>
+        `${index === 0 ? "Your tactic in use" : `Your tactic ${format(index + 1)}`}${style ? ` (${style})` : ""}`,
+      reference: (name: string) => `${name} · the editor's formation`,
+      ownGroup: "Your tactics",
+      referenceGroup: "The editor's formations",
+      weight: "In possession counts",
+      availableOnly: "Leave out the injured and banned",
+      noTactic: "The editor found none of your tactics, so it shows its own formations. Pick a team in the game to see yours.",
+      unknownRoles: (count: number) =>
+        count === 1
+          ? "1 slot has a role the editor does not recognise yet: it is measured by its other role."
+          : `${format(count)} slots have a role the editor does not recognise yet: they are measured by their other role.`,
+      summary: (first: string, second: string, size: number) =>
+        `Average fit: first eleven ${first} · second eleven ${second} · picked from ${format(size)} players`,
+      columns: {
+        slot: "Slot",
+        roles: "Roles",
+        first: "First eleven",
+        second: "Second eleven",
+        cover: "Also fits",
+      },
+      nobody: "Nobody fits",
+      how: {
+        label: "How is the eleven picked?",
+        note: "Each player's value in a slot is his fit for its two roles, weighed as you choose. The editor then looks at every way to put your senior squad into the eleven slots at once and keeps the one with the highest total: no other eleven fits these slots better together. The second eleven is the best of the players left. Players on loan elsewhere are left out.",
+      },
+      fitTitle: (inPossession: string | null, outOfPossession: string | null) =>
+        [inPossession !== null && `In possession: ${inPossession}`, outOfPossession !== null && `Out of possession: ${outOfPossession}`]
+          .filter(Boolean)
+          .join("\n"),
+    },
+    /** The Tactics section: how well the senior squad fills each tactic. */
+    tactics: {
+      intro: "How well your senior squad fills each tactic: the most slots filled well first (a fit of 60 or more), then by the first eleven's average fit.",
+      columns: {
+        tactic: "Tactic",
+        covered: "Filled well",
+        first: "First eleven",
+        second: "Second eleven",
+        units: "By part of the team",
+      },
+      covered: (covered: number, size: number) => `${format(covered)}/${format(size)}`,
+      units: { goalkeeper: "GK", defence: "Defence", midfield: "Midfield", attack: "Attack" },
+      open: "Show its eleven",
+      empty: "No tactic to compare.",
+    },
+    /** The Roles group of the player profile: how he suits each role, and what to train. */
+    playerRoles: {
+      heading: "Roles",
+      inPossession: "In possession",
+      outOfPossession: "Out of possession",
+      more: "All roles",
+      fewer: "Fewer roles",
+      training: (role: string) => `To train for ${role}`,
+      trainingRole: "Train for",
+      gain: (gain: string) => `+${gain} a point`,
+      gainTitle: "What one more point of it adds to his fit for the role",
+      noTraining: "Nothing left to train for this role.",
+      keyAttribute: "The role leans on it most",
+      at: (position: string, rating: number) => `${position} · ${format(rating)}`,
+      note: "Fit uses the editor's own attribute weights for each role. Training advice weighs what an attribute adds to the role against how much his age still lets it grow.",
+    },
     roles: {
       bgk: "Ball-Playing Goalkeeper",
       ngk: "No-Nonsense Goalkeeper",
@@ -2477,6 +2550,26 @@ export const en = {
       p: "Poacher",
       tcf: "Tracking Centre Forward",
       ocf: "Outlet Centre Forward",
+      gk: "Goalkeeper",
+      dlp: "Deep-Lying Playmaker",
+      mpm: "Midfield Playmaker",
+      iw: "Inside Winger",
+      wm: "Wide Midfielder",
+      fr: "Free Role",
+      ss: "Second Striker",
+      chf: "Channel Forward",
+      f9: "False Nine",
+      tf: "Target Forward",
+      cwd: "Covering Wide Centre-Back",
+      swd: "Stopping Wide Centre-Back",
+      sdm: "Screening Defensive Midfielder",
+      wdm: "Wide Covering Defensive Midfielder",
+      twm: "Tracking Wide Midfielder",
+      owm: "Outlet Wide Midfielder",
+      sam: "Splitting Outlet Attacking Midfielder",
+      tam: "Tracking Attacking Midfielder",
+      wow: "Wide Outlet Winger",
+      scf: "Splitting Outlet Centre Forward",
     } as Record<string, string>,
     reasons: {
       listed: () => "Transfer listed",

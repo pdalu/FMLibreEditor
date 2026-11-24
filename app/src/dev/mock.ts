@@ -3,7 +3,7 @@
 
 import { dateFromNumber, numberFromDate } from "../editing";
 import { fold } from "../format";
-import { scoutingOverview, scoutingSuggest } from "./mockScouting";
+import { playerRoles, scoutingCompare, scoutingLineup, scoutingOverview, scoutingSuggest, scoutingTactics } from "./mockScouting";
 import type {
   ApplyReport,
   AttributeBound,
@@ -14,6 +14,9 @@ import type {
   CaptainRole,
   ClubTeam,
   ScoutRequest,
+  SlotRoles,
+  SquadChoice,
+  Phase,
   SquadPlayer,
   TeamAction,
   TeamFreeze,
@@ -3009,6 +3012,28 @@ export async function mockInvoke<T>(command: string, args?: Record<string, unkno
       return scoutingOverview({ players, clubs, ratings, women }) as T;
     case "scouting_suggest":
       return scoutingSuggest({ players, clubs, ratings, women }, (args?.request ?? {}) as ScoutRequest) as T;
+    case "scouting_tactics":
+      return scoutingTactics() as T;
+    case "scouting_lineup":
+      return scoutingLineup(
+        { players, clubs, ratings, women },
+        (args?.slots ?? []) as SlotRoles[],
+        Number(args?.weight ?? 0.6),
+        (args?.choice ?? { availableOnly: false }) as SquadChoice,
+      ) as T;
+    case "scouting_compare":
+      return scoutingCompare(
+        { players, clubs, ratings, women },
+        (args?.own ?? []) as { style: string | null; slots: SlotRoles[] }[],
+        Number(args?.weight ?? 0.6),
+        (args?.choice ?? { availableOnly: false }) as SquadChoice,
+      ) as T;
+    case "player_roles":
+      return playerRoles(
+        { players, clubs, ratings, women },
+        Number(args?.uid),
+        (args?.role ?? null) as { key: string; phase: Phase } | null,
+      ) as T;
     case "club_squads":
       return clubSquads(Number(args?.uid)) as T;
     case "set_captain":

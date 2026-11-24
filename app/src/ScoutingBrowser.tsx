@@ -11,6 +11,7 @@ import { PlayerDialog } from "./PlayerProfile";
 import { isRecord, restored, useSnapshot } from "./restore";
 import { ScoutDepartures, DEPARTURE_FILTERS, type DepartureFilter } from "./ScoutDepartures";
 import { ScoutDepth } from "./ScoutDepth";
+import { ScoutLineup, ScoutTactics, useTactics } from "./ScoutLineup";
 import {
   type Brief,
   DEFAULT_BRIEF,
@@ -20,9 +21,9 @@ import {
 } from "./ScoutRecommendations";
 import type { PlayerSummary, ScoutingOverview } from "./types";
 
-type ScoutTab = "recommend" | "depth" | "departures";
+type ScoutTab = "recommend" | "lineup" | "tactics" | "depth" | "departures";
 
-const TABS: ScoutTab[] = ["recommend", "depth", "departures"];
+const TABS: ScoutTab[] = ["recommend", "lineup", "tactics", "depth", "departures"];
 
 /** What was saved before the language was switched; a start from scratch for what is missing or wrong. */
 interface Saved {
@@ -63,6 +64,8 @@ export function ScoutingBrowser({ version, active }: { version: number; active: 
   const [departureFilter, setDepartureFilter] = useState<DepartureFilter>(saved.departures);
   const [shown, setShown] = useState<PlayerSummary | null>(null);
   useSnapshot("scouting", () => ({ tab, brief: chosen, departures: departureFilter }));
+  // The manager's tactics take a few seconds to read: only once the sections that need them are opened.
+  const tactics = useTactics(version, active && overview !== null && (tab === "lineup" || tab === "tactics"));
 
   // The data version the club was read at; it is read again when the tab is shown after the data changed.
   const loadedVersion = useRef<number | null>(null);
@@ -203,7 +206,22 @@ export function ScoutingBrowser({ version, active }: { version: number; active: 
             onBrief={(patch) => setChosen({ ...brief, ...patch })}
             onOpen={setShown}
             hidden={tab !== "recommend"}
+            tactic={
+              tactics.own !== null && tactics.chosen
+                ? { slots: tactics.chosen.slots, label: tactics.chosen.label, weight: tactics.weight }
+                : null
+            }
           />
+          {tab === "lineup" && <ScoutLineup state={tactics} onOpen={setShown} />}
+          {tab === "tactics" && (
+            <ScoutTactics
+              state={tactics}
+              onShow={(id) => {
+                tactics.choose(id);
+                setTab("lineup");
+              }}
+            />
+          )}
           {tab === "depth" && (
             <ScoutDepth
               report={report}

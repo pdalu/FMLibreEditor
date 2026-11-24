@@ -9,6 +9,13 @@ import type {
   Scouted,
   ScoutingOverview,
   ScoutRequest,
+  Lineup,
+  OwnTactic,
+  Phase,
+  PlayerRoles,
+  SlotRoles,
+  SquadChoice,
+  TacticRank,
   ClubName,
   ClubTeam,
   EditField,
@@ -381,6 +388,21 @@ export const scoutingOverview = () => call<ScoutingOverview>("scouting_overview"
 
 /** Players a scout would recommend for the position `request` describes, for the human manager's club. */
 export const scoutingSuggest = (request: ScoutRequest) => call<Scouted>("scouting_suggest", { request });
+
+/** The human manager's tactics, read from the game's memory (a few seconds). */
+export const scoutingTactics = () => call<OwnTactic[]>("scouting_tactics");
+
+/** The best eleven and second eleven of the senior squad in `slots`. */
+export const scoutingLineup = (slots: SlotRoles[], weight: number, choice: SquadChoice) =>
+  call<Lineup>("scouting_lineup", { slots, weight, choice });
+
+/** How well the senior squad fills the manager's tactics `own` and the editor's formations. */
+export const scoutingCompare = (own: { style: string | null; slots: SlotRoles[] }[], weight: number, choice: SquadChoice) =>
+  call<TacticRank[]>("scouting_compare", { own, weight, choice });
+
+/** How the player suits every role, and what he would best train for `role` (his best one in possession when null). */
+export const playerRoles = (uid: number, role: { key: string; phase: Phase } | null = null) =>
+  call<PlayerRoles>("player_roles", { uid, role });
 
 /**
  * The name of the stadium the club plays at, with the names it can take in place (see `StadiumName`). Only reads the

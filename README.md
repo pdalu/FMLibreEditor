@@ -40,6 +40,9 @@ How to install and use it: [docs/INSTALL.md](docs/INSTALL.md).
   own job or another (doctors, analysts and directors of football too), or sign staff who have
   no club.
 - Mass edit many at once, with a preview; undo any change.
+- Scout your squad: how every player suits each of the game's 79 roles and what he should train, the best
+  eleven and second eleven of your tactic worked out exactly, how your squad fills other formations, and transfer
+  advice that says how much a signing would lift your best eleven.
 - Export the player list, with its search and filters, to CSV or JSON for a spreadsheet or
   your own tools: attributes, positions, personality, contract and more, with the in-game date.
 - Checks how it reads the game before it writes, and stays read-only on a version of FM27 it
