@@ -144,15 +144,38 @@ What the same plan needs in the app: a team select beside the job select, offeri
 Squad tab's names), not offered for a job that is the club's (director of football, scout, chief doctor and the like)
 and where the club has no youth team with staff.
 
+## Checked in the game
+
+On the Mac Steam build 26797085 (Apple silicon; a build with no profile yet, every `health` check passed), on the same
+save of 28 September 2026, the game's own screens were read before, during and after one write:
+
+- **Before.** A club's All staff page (Squadra / Incarico columns) lists each person with the team of his contract
+  ("Prima squadra", "Squadra U21", "Squadra U18") and his job: "Allenatore" (16), "Allenatore in seconda" (20),
+  "Collaboratore Tecnico" (2), "Allenatore dei portieri" (34), "Preparatore atletico" (26), "Analista delle
+  performance" (60), "Preparatore recupero infortunati" (48), "Fisioterapista" (12). A youth team's manager is
+  "Allenatore", the same word as the first team's; the team is the column beside it. The chosen U18 team had eight
+  staff and no "Allenatore" row: the game shows an empty place as no row at all. The coach's profile read
+  "Collaboratore Tecnico - Under 18".
+- **The write** (`fmlibre-probe youth-manager`, a test command, not for the app): two writes, the U18 team's `+0x80`
+  from null to the coach's object and his contract's job from 2 to 16; his contract's team was the U18 team already.
+  `staff-places --team-offset 0x80` read 178 U18 managers under contract with their team, one more than before.
+- **Before Continue**, the All staff page, opened again, listed him as "Allenatore" of "Squadra U18", in one row.
+- **A day on** (29 September), the page and memory still had him as the team's manager under the same contract; the
+  game neither took him out nor put anyone else in.
+- **The undo** put both writes back: Coach again, the team's place empty, 177 U18 managers. The page still showed him as
+  "Allenatore" until Continue, and "Collaboratore Tecnico" after it. So the game may keep what that page shows for a
+  while and build it again on Continue; whether opening another page and coming back, as after the write, is enough
+  was not told apart. An editor feature should say the change shows for sure after Continue.
+- **Three days on** (2 October), the team still had no manager: the game had not appointed one.
+
+Still open after it: whether the game appoints a youth manager over a longer time, what the coach's profile and the
+inbox said meanwhile, and a save and load with the change in place.
+
 ## Not known, and how to check
 
-- **How the game names a youth team's manager and staff on screen.** The jobs are job codes the game names itself
-  ("Allenatore" for 16); whether a U21 team's page shows him as such, and what an assistant coach there is called, needs a
-  look at a club's U21 Staff page.
-- **Whether the game keeps its own list of a team's staff, built from the contracts**, as it seems to for doctors
-  (`fm27-staff.md`: "the team's staff, which the game builds again on Continue"). None was found in memory: the objects
-  that point at a youth coach are listed above. A write would show it: set a coach's contract team, read the team's
-  Staff page, then Continue and read it again.
+- **Moving someone to another team of the club** (a contract's team written, not only a job): the write above did not
+  need it, as the coach worked for that team already. The Squadra column follows the contract's team, so it should
+  show, but it was not tried.
 - **Whether a youth team can go without a manager.** The game leaves some without (30 teams in this save), but does not
   tell what its match day or the human manager's advice does with one the editor emptied.
 - **The human manager's club.** The game lets a human manager give his staff responsibilities. No object of that kind was
