@@ -124,6 +124,8 @@ enum Command {
         /// The club's unique ID.
         uid: u32,
     },
+    /// Every club's debt records, tab-separated (issue 118). Only reads memory.
+    Debts,
     /// Show everything FMLibreEditor reads for the member of staff with this id.
     StaffMember {
         /// The staff id.
@@ -1072,6 +1074,7 @@ fn run(cli: Cli) -> Result<()> {
             let export = export.as_deref().map(|path| (path, export_format(path, semicolon)));
             clubs(&session, text.as_deref(), limit, export)
         }
+        Command::Debts => debts(&connect(process, ArraySource::ProfileFirst)?),
         Command::Club { uid } => club(&connect(process, ArraySource::ProfileFirst)?, uid),
         Command::Players { text, limit, filter, export, semicolon } => {
             let session = connect(process, ArraySource::ProfileFirst)?;
@@ -5582,6 +5585,36 @@ fn iso_date(date: Option<FmDate>) -> String {
 }
 
 /// Shortens `text` to at most `width` characters.
+fn debts(session: &Session) -> Result<()> {
+    let p = &session.process;
+    println!("uid\tclub\trep\tn\ttype\toriginal\tmonthly\tinterest\tx0c\tstart\tend\tx19\tx1a\tinfo\trecord");
+    for c in session.clubs()? {
+        let Ok(info) = p.read_u64(c.address + session.layout.club.info) else { continue };
+        if !is_user_pointer(info) {
+            continue;
+        }
+        let (Ok(begin), Ok(end)) = (p.read_u64(info + 0x50), p.read_u64(info + 0x58)) else { continue };
+        if !is_user_pointer(begin) || end <= begin || (end - begin) % 8 != 0 || end - begin > 8 * 64 {
+            continue;
+        }
+        for n in 0..(end - begin) / 8 {
+            let Ok(record) = p.read_u64(begin + n * 8) else { continue };
+            let Ok(b) = p.read_bytes(record, 0x1C) else { continue };
+            let i = |o: usize| i32::from_le_bytes(b[o..o + 4].try_into().expect("4 bytes"));
+            let w = |o: usize| u16::from_le_bytes(b[o..o + 2].try_into().expect("2 bytes"));
+            let date = |o: usize| {
+                FmDate::from_raw(w(o), w(o + 2)).map_or_else(|| format!("raw:{:04x}:{}", w(o), w(o + 2)), |d| d.to_number().to_string())
+            };
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:#x}\t{:#x}",
+                c.uid, c.name, c.reputation.unwrap_or(0), n, b[0x18], i(0), i(4), i(8), i(0xC), date(0x14), date(0x10),
+                b[0x19], w(0x1A), info, record
+            );
+        }
+    }
+    Ok(())
+}
+
 fn clip(text: &str, width: usize) -> String {
     if text.chars().count() <= width {
         return text.to_owned();
